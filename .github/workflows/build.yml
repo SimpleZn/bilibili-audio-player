@@ -28,7 +28,8 @@ jobs:
         run: npm run build
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: bilibili-audio-player-extension
           path: dist/ 
+          if-no-files-found: error # Error if the app is not found 

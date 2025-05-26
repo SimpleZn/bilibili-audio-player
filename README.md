@@ -1,3 +1,6 @@
+
+Read this in: [中文](README.md) | [English](README_EN.md)
+
 # Bilibili Audio Player Chrome Extension - 使用说明
 
 ## 功能介绍

@@ -29,13 +29,46 @@ document.addEventListener('DOMContentLoaded', () => {
   const volumeSlider = document.getElementById('volume-slider') as HTMLDivElement;
   const volumeLevel = document.getElementById('volume-level') as HTMLDivElement;
   
-  let videoData = null;
+  // Playlist specific DOM elements
+  const playlistInfoDiv = document.getElementById('playlist-info') as HTMLDivElement;
+  const playlistNameEl = document.getElementById('playlist-name') as HTMLParagraphElement;
+  const playlistTrackIndicatorEl = document.getElementById('playlist-track-indicator') as HTMLParagraphElement;
+  const prevTrackBtn = document.getElementById('prev-track-btn') as HTMLButtonElement;
+  const nextTrackBtn = document.getElementById('next-track-btn') as HTMLButtonElement;
+
+  let videoData: CurrentTrackData | null = null; // Updated type
+  
+  // State variables for playlist
+  let currentPlaylist: PlaylistItem[] | null = null;
+  let currentPlaylistName: string | null = null;
+  let currentTrackIndex: number = -1;
+  let isPlaylistMode: boolean = false;
+
+  // Interface for current track data
+  interface CurrentTrackData {
+    title: string;
+    audioUrl: string;
+    bvid?: string;
+  }
   
   // Listen for messages from popup
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.action === 'playAudio' && message.data) {
-      videoData = message.data;
+    if (message.action === 'playPlaylist') {
+      isPlaylistMode = true;
+      const { playlist, startIndex } = message.data as { playlist: Playlist, startIndex: number };
+      currentPlaylist = playlist.items;
+      currentPlaylistName = playlist.name;
+      currentTrackIndex = startIndex || 0;
+      startOrContinuePlaylistPlayback();
+      updatePlaylistUI();
+    } else if (message.action === 'playAudio' && message.data) {
+      isPlaylistMode = false;
+      currentPlaylist = null;
+      currentPlaylistName = null;
+      currentTrackIndex = -1;
+      videoData = message.data; // Assign to the module-level videoData
       initializePlayer(videoData);
+      updatePlaylistUI();
     }
   });
   
@@ -46,16 +79,38 @@ document.addEventListener('DOMContentLoaded', () => {
   const bvidParam = urlParams.get('bvid');
   
   if (audioUrlParam && titleParam) {
+    isPlaylistMode = false; // Ensure playlist mode is off
     videoData = {
       audioUrl: decodeURIComponent(audioUrlParam),
       title: decodeURIComponent(titleParam),
       bvid: bvidParam || ''
     };
     initializePlayer(videoData);
+    updatePlaylistUI(); // Hide playlist UI elements
+  }
+  
+  // Function to start or continue playlist playback
+  function startOrContinuePlaylistPlayback() {
+    if (isPlaylistMode && currentPlaylist && currentTrackIndex >= 0 && currentTrackIndex < currentPlaylist.length) {
+      const trackItem = currentPlaylist[currentTrackIndex];
+      // Map PlaylistItem to CurrentTrackData structure
+      const trackData: CurrentTrackData = { 
+        title: trackItem.title, 
+        audioUrl: trackItem.audioUrl, 
+        bvid: trackItem.bvid 
+      };
+      initializePlayer(trackData);
+      updatePlaylistUI(); // Update track indicator
+    } else if (isPlaylistMode) {
+      // Playlist ended or invalid state
+      isPlaylistMode = false;
+      showPlayerMessage('播放列表已结束或状态无效。', 'info');
+      updatePlaylistUI();
+    }
   }
   
   // Initialize player with video data
-  async function initializePlayer(data: any) { // data is the videoData for current video
+  async function initializePlayer(data: CurrentTrackData) { // data is the videoData for current video
     if (!data || !data.audioUrl) {
       showPlayerMessage('无法加载音频数据', 'error');
       return;
@@ -139,6 +194,37 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // Initialize custom player controls
   function initializeCustomControls(currentVideoData: any) { // Receive videoData
+    // Audio ended listener (for playlist progression)
+    audioPlayer.addEventListener('ended', () => {
+      if (isPlaylistMode && currentPlaylist) {
+        currentTrackIndex++;
+        if (currentTrackIndex < currentPlaylist.length) {
+          startOrContinuePlaylistPlayback();
+        } else {
+          // Playlist ended
+          isPlaylistMode = false;
+          showPlayerMessage('播放列表已结束。', 'info');
+          updatePlaylistUI(); // Hide playlist controls and info
+        }
+      }
+    });
+
+    // Next Track button listener
+    nextTrackBtn.addEventListener('click', () => {
+      if (isPlaylistMode && currentPlaylist && currentTrackIndex < currentPlaylist.length - 1) {
+        currentTrackIndex++;
+        startOrContinuePlaylistPlayback();
+      }
+    });
+
+    // Previous Track button listener
+    prevTrackBtn.addEventListener('click', () => {
+      if (isPlaylistMode && currentPlaylist && currentTrackIndex > 0) {
+        currentTrackIndex--;
+        startOrContinuePlaylistPlayback();
+      }
+    });
+    
     // Play/Pause button
     playPauseBtn.addEventListener('click', () => {
       if (audioPlayer.paused) {
@@ -377,4 +463,19 @@ document.addEventListener('DOMContentLoaded', () => {
     return false; // Not found in any playlist
   }
   // --- End Favorite Icon Logic ---
+
+  // Function to update playlist UI elements
+  function updatePlaylistUI() {
+    if (isPlaylistMode && currentPlaylistName && currentPlaylist) {
+      playlistInfoDiv.style.display = 'block';
+      playlistNameEl.textContent = `播放列表: ${currentPlaylistName}`;
+      playlistTrackIndicatorEl.textContent = `曲目 ${currentTrackIndex + 1} / ${currentPlaylist.length}`;
+      prevTrackBtn.style.display = 'inline-block';
+      nextTrackBtn.style.display = 'inline-block';
+    } else {
+      playlistInfoDiv.style.display = 'none';
+      prevTrackBtn.style.display = 'none';
+      nextTrackBtn.style.display = 'none';
+    }
+  }
 });

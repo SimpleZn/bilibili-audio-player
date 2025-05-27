@@ -1,6 +1,13 @@
 // Settings page script
 import { Playlist, PlaylistItem } from './utils/playlistTypes'; // 1. Import Playlist Types
 
+interface HistoryItem {
+  title: string;
+  bvid?: string;
+  audioUrl: string;
+  timestamp: string;
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   const sessdataInput = document.getElementById('sessdata') as HTMLInputElement;
   const saveButton = document.getElementById('save-btn') as HTMLButtonElement;
@@ -18,6 +25,26 @@ document.addEventListener('DOMContentLoaded', async () => {
   const backToPlaylistsBtn = document.getElementById('back-to-playlists-btn') as HTMLButtonElement;
   const playlistItemsList = document.getElementById('playlist-items-list') as HTMLUListElement;
 
+  // Full History DOM Elements
+  const fullHistoryListEl = document.getElementById('full-history-list') as HTMLUListElement;
+  const noFullHistoryMessageEl = document.getElementById('no-full-history-message') as HTMLParagraphElement;
+
+  // Copied from popup.ts (or should be from a shared util)
+  function formatRelativeTime(isoTimestamp: string): string {
+      const now = new Date();
+      const past = new Date(isoTimestamp);
+      const diffInSeconds = Math.floor((now.getTime() - past.getTime()) / 1000);
+      const units: { name: string, seconds: number }[] = [
+          { name: '年', seconds: 31536000 }, { name: '月', seconds: 2592000 },
+          { name: '天', seconds: 86400 }, { name: '小时', seconds: 3600 },
+          { name: '分钟', seconds: 60 },
+      ];
+      for (const unit of units) {
+          const interval = Math.floor(diffInSeconds / unit.seconds);
+          if (interval >= 1) return `${interval} ${unit.name}前`;
+      }
+      return '刚刚';
+  }
 
   // --- Utility to show status messages ---
   function showStatus(message: string, type: 'success' | 'error') {
@@ -59,6 +86,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   // --- Playlist Management ---
+
+  function _playHistoryItem(item: { title: string; audioUrl: string; bvid?: string }) {
+    const playerUrl = chrome.runtime.getURL(
+      `player.html?audioUrl=${encodeURIComponent(item.audioUrl)}&title=${encodeURIComponent(item.title)}&bvid=${encodeURIComponent(item.bvid || '')}`
+    );
+    chrome.windows.create({
+      url: playerUrl,
+      type: 'popup',
+      width: 400,
+      height: 600
+    });
+  }
 
   // 3. loadPlaylists Function
   async function loadPlaylists() {
@@ -363,4 +402,62 @@ document.addEventListener('DOMContentLoaded', async () => {
       showStatus('移除歌曲失败。', 'error');
     }
   }
+
+  async function displayFullPlaybackHistory() {
+    if (!fullHistoryListEl || !noFullHistoryMessageEl) return;
+
+    try {
+      const result = await chrome.storage.local.get('playbackHistory');
+      const history: HistoryItem[] = result.playbackHistory || [];
+
+      fullHistoryListEl.innerHTML = ''; // Clear previous items
+
+      if (history.length === 0) {
+        noFullHistoryMessageEl.style.display = 'block';
+        fullHistoryListEl.style.display = 'none';
+        return;
+      }
+
+      noFullHistoryMessageEl.style.display = 'none';
+      fullHistoryListEl.style.display = 'block';
+
+      history.forEach(item => {
+        const li = document.createElement('li');
+        li.className = 'full-history-item';
+        li.dataset.audioUrl = item.audioUrl;
+        li.dataset.title = item.title;
+        if (item.bvid) {
+          li.dataset.bvid = item.bvid;
+        }
+
+        const titleSpan = document.createElement('span');
+        titleSpan.className = 'full-history-title';
+        titleSpan.textContent = item.title;
+        titleSpan.title = item.title; // Show full title on hover
+
+        const timestampSpan = document.createElement('span');
+        timestampSpan.className = 'full-history-timestamp';
+        timestampSpan.textContent = formatRelativeTime(item.timestamp);
+
+        li.appendChild(titleSpan);
+        li.appendChild(timestampSpan);
+
+        li.addEventListener('click', () => {
+          _playHistoryItem({
+            audioUrl: item.audioUrl,
+            title: item.title,
+            bvid: item.bvid || ''
+          });
+        });
+        fullHistoryListEl.appendChild(li);
+      });
+    } catch (error) {
+      console.error('Error displaying full playback history:', error);
+      noFullHistoryMessageEl.textContent = '无法加载播放历史记录。';
+      noFullHistoryMessageEl.style.display = 'block';
+      fullHistoryListEl.style.display = 'none';
+    }
+  }
+
+  displayFullPlaybackHistory();
 });

@@ -1,6 +1,6 @@
 // Settings page script
 import { Playlist, PlaylistItem } from "./utils/playlistTypes"; // 1. Import Playlist Types
-import { getBilibiliAudio as fetchBilibiliAudioUtil, loadAuthConfig } from "./utils/bilibiliApi"; // For direct call if needed, or for type info
+import { getBilibiliAudio as fetchBilibiliAudioUtil, loadAuthConfig, extractVideoId } from "./utils/bilibiliApi"; // For direct call if needed, or for type info, added extractVideoId
 import { HistoryItem, BilibiliVideoInfo } from "./utils/types"; // Import shared types
 
 // Define BilibiliVideoInfo interface (mirroring from other files, ideally shared)
@@ -44,6 +44,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   const fullHistoryListEl = document.getElementById('full-history-list') as HTMLUListElement;
   const noFullHistoryMessageEl = document.getElementById('no-full-history-message') as HTMLParagraphElement;
   const clearFullHistoryBtn = document.getElementById('clear-full-history-btn') as HTMLButtonElement; // 新增清空历史按钮
+
+  // DOM elements for adding video to playlist (within items view)
+  const addVideoUrlInput = document.getElementById('add-video-url-input') as HTMLInputElement;
+  const addVideoToPlaylistBtn = document.getElementById('add-video-to-playlist-btn') as HTMLButtonElement;
+
+  let currentEditingPlaylistId: string | null = null; // To store the ID of the playlist being viewed/edited
 
   // Copied from popup.ts (or should be from a shared util)
   function formatRelativeTime(isoTimestamp: string): string {
@@ -376,6 +382,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   
   // displayPlaylistItems Function (3)
   async function displayPlaylistItems(playlistId: string) {
+    currentEditingPlaylistId = playlistId; // Store the current playlist ID
     try {
       const data = await chrome.storage.local.get('userPlaylists');
       const playlists: Playlist[] = data.userPlaylists || [];
@@ -561,4 +568,82 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Initial call to display history
   displayFullPlaybackHistory();
+
+  // Event listener for adding video to the current playlist
+  if (addVideoToPlaylistBtn && addVideoUrlInput) {
+    addVideoToPlaylistBtn.addEventListener('click', async () => {
+      if (!currentEditingPlaylistId) {
+        showStatus('没有选定的播放合集。', 'error');
+        return;
+      }
+      const videoUrl = addVideoUrlInput.value.trim();
+      if (!videoUrl) {
+        showStatus('请输入视频链接。', 'error');
+        return;
+      }
+
+      // 1. Validate URL and get BVID (using extractVideoId from bilibiliApi)
+      const videoIdParts = extractVideoId(videoUrl); // Now correctly using the imported extractVideoId
+      
+      if (!videoIdParts || (!videoIdParts.bvid && !videoIdParts.aid)) {
+        showStatus('无效的 Bilibili 视频链接或无法提取ID。', 'error');
+        return;
+      }
+
+      // Prefer BVID if available, construct a URL that getBilibiliAudio can definitely use.
+      // The bvid is needed for fetching and for storing.
+      const bvidToFetch = videoIdParts.bvid || (videoIdParts.aid ? `av${videoIdParts.aid}` : null);
+      if (!bvidToFetch) { // Should not happen if previous check passed, but for safety
+        showStatus('无法确定视频的BVID。', 'error');
+        return;
+      }
+
+      showStatus('正在提取视频信息...', 'info', 0);
+      const videoInfo = await fetchFreshVideoInfoFromBackground(bvidToFetch);
+
+      if (!videoInfo || !videoInfo.bvid || !videoInfo.cid) { // Ensure we have bvid and cid
+        showStatus('无法获取视频信息，请检查链接或视频是否有效。', 'error');
+        return;
+      }
+
+      // 2. Add to playlist logic
+      try {
+        const data = await chrome.storage.local.get('userPlaylists');
+        let playlists: Playlist[] = data.userPlaylists || [];
+        const playlistIndex = playlists.findIndex(p => p.id === currentEditingPlaylistId);
+
+        if (playlistIndex === -1) {
+          showStatus('发生错误：找不到当前播放合集。', 'error');
+          return;
+        }
+
+        // Check for duplicates within this playlist
+        if (playlists[playlistIndex].items.some(item => item.bvid === videoInfo.bvid)) {
+          showStatus(`视频 "${videoInfo.title}" 已存在于此播放合集中。`, 'error');
+          addVideoUrlInput.value = ''; // Clear input
+          return;
+        }
+
+        const newPlaylistItem: PlaylistItem = {
+          id: Date.now().toString(), // Unique ID for playlist item
+          title: videoInfo.title,
+          bvid: videoInfo.bvid,
+          cid: videoInfo.cid,
+          // audioUrl is not stored here, will be fetched on demand by player
+          addedAt: new Date().toISOString(),
+        };
+
+        playlists[playlistIndex].items.push(newPlaylistItem);
+        playlists[playlistIndex].updatedAt = new Date().toISOString();
+
+        await chrome.storage.local.set({ userPlaylists: playlists });
+        showStatus(`"${videoInfo.title}" 已添加到播放合集！`, 'success');
+        addVideoUrlInput.value = ''; // Clear input
+        await displayPlaylistItems(currentEditingPlaylistId); // Refresh items view
+      } catch (error) {
+        console.error('Error adding video to playlist:', error);
+        showStatus('添加视频到播放合集失败。', 'error');
+      }
+    });
+  }
 });

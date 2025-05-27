@@ -1,12 +1,23 @@
 // Player page script
+import { Playlist, PlaylistItem } from './utils/playlistTypes'; // 1. Import Playlist Types
+
+// Define the HistoryItem interface
+interface HistoryItem {
+  title: string;
+  bvid?: string;
+  audioUrl: string;
+  timestamp: string; // ISO string format for date/time
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   const audioPlayer = document.getElementById('audio-player') as HTMLAudioElement;
   const headerTitle = document.getElementById('header-title') as HTMLHeadingElement;
   const videoTitle = document.getElementById('video-title') as HTMLDivElement;
   const videoId = document.getElementById('video-id') as HTMLDivElement;
-  const errorMessage = document.getElementById('error-message') as HTMLDivElement;
+  const statusMessage = document.getElementById('status-message') as HTMLDivElement; // 2. Updated DOM ref
   const settingsBtn = document.getElementById('settings-btn') as HTMLButtonElement;
   const closeBtn = document.getElementById('close-btn') as HTMLButtonElement;
+  const addToPlaylistBtn = document.getElementById('add-to-playlist-btn') as HTMLButtonElement; // 2. New DOM ref
   
   // Custom player controls
   const playPauseBtn = document.getElementById('play-pause-btn') as HTMLButtonElement;
@@ -18,13 +29,46 @@ document.addEventListener('DOMContentLoaded', () => {
   const volumeSlider = document.getElementById('volume-slider') as HTMLDivElement;
   const volumeLevel = document.getElementById('volume-level') as HTMLDivElement;
   
-  let videoData = null;
+  // Playlist specific DOM elements
+  const playlistInfoDiv = document.getElementById('playlist-info') as HTMLDivElement;
+  const playlistNameEl = document.getElementById('playlist-name') as HTMLParagraphElement;
+  const playlistTrackIndicatorEl = document.getElementById('playlist-track-indicator') as HTMLParagraphElement;
+  const prevTrackBtn = document.getElementById('prev-track-btn') as HTMLButtonElement;
+  const nextTrackBtn = document.getElementById('next-track-btn') as HTMLButtonElement;
+
+  let videoData: CurrentTrackData | null = null; // Updated type
+  
+  // State variables for playlist
+  let currentPlaylist: PlaylistItem[] | null = null;
+  let currentPlaylistName: string | null = null;
+  let currentTrackIndex: number = -1;
+  let isPlaylistMode: boolean = false;
+
+  // Interface for current track data
+  interface CurrentTrackData {
+    title: string;
+    audioUrl: string;
+    bvid?: string;
+  }
   
   // Listen for messages from popup
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.action === 'playAudio' && message.data) {
-      videoData = message.data;
+    if (message.action === 'playPlaylist') {
+      isPlaylistMode = true;
+      const { playlist, startIndex } = message.data as { playlist: Playlist, startIndex: number };
+      currentPlaylist = playlist.items;
+      currentPlaylistName = playlist.name;
+      currentTrackIndex = startIndex || 0;
+      startOrContinuePlaylistPlayback();
+      updatePlaylistUI();
+    } else if (message.action === 'playAudio' && message.data) {
+      isPlaylistMode = false;
+      currentPlaylist = null;
+      currentPlaylistName = null;
+      currentTrackIndex = -1;
+      videoData = message.data as CurrentTrackData; // Assign to the module-level videoData
       initializePlayer(videoData);
+      updatePlaylistUI();
     }
   });
   
@@ -35,45 +79,152 @@ document.addEventListener('DOMContentLoaded', () => {
   const bvidParam = urlParams.get('bvid');
   
   if (audioUrlParam && titleParam) {
+    isPlaylistMode = false; // Ensure playlist mode is off
     videoData = {
       audioUrl: decodeURIComponent(audioUrlParam),
       title: decodeURIComponent(titleParam),
       bvid: bvidParam || ''
     };
     initializePlayer(videoData);
+    updatePlaylistUI(); // Hide playlist UI elements
+  }
+  
+  // Function to start or continue playlist playback
+  function startOrContinuePlaylistPlayback() {
+    if (isPlaylistMode && currentPlaylist && currentTrackIndex >= 0 && currentTrackIndex < currentPlaylist.length) {
+      const trackItem = currentPlaylist[currentTrackIndex];
+      // Map PlaylistItem to CurrentTrackData structure
+      const trackData: CurrentTrackData = { 
+        title: trackItem.title, 
+        audioUrl: trackItem.audioUrl, 
+        bvid: trackItem.bvid 
+      };
+      initializePlayer(trackData);
+      updatePlaylistUI(); // Update track indicator
+    } else if (isPlaylistMode) {
+      // Playlist ended or invalid state
+      isPlaylistMode = false;
+      showPlayerMessage('播放列表已结束或状态无效。', 'info');
+      updatePlaylistUI();
+    }
   }
   
   // Initialize player with video data
-  function initializePlayer(data: any) {
+  async function initializePlayer(data: CurrentTrackData) { // data is the videoData for current video
     if (!data || !data.audioUrl) {
-      showError('无法加载音频数据');
+      showPlayerMessage('无法加载音频数据', 'error');
       return;
     }
     
+    // Store videoData at module level for access by other functions
+    videoData = data; // Ensure videoData is assigned here
+
+    // Update playback history
+    await updatePlaybackHistory(videoData); // Pass videoData explicitly
+    
     // Set video info
-    headerTitle.textContent = data.title;
-    videoTitle.textContent = data.title;
-    videoId.textContent = `BV: ${data.bvid}`;
+    headerTitle.textContent = videoData.title;
+    videoTitle.textContent = videoData.title;
+    videoId.textContent = `BV: ${videoData.bvid}`;
     
     // Set audio source
-    audioPlayer.src = data.audioUrl;
+    audioPlayer.src = videoData.audioUrl;
     audioPlayer.volume = 0.7; // Default volume
     
     // Update volume level display
     updateVolumeLevel(audioPlayer.volume);
+
+    // Check and set favorite icon state
+    const isFav = await checkIfVideoIsFavorited(videoData);
+    updateFavoriteIcon(isFav);
     
     // Auto play
     audioPlayer.play().catch(error => {
       console.error('Auto-play failed:', error);
-      showError('自动播放失败，请点击播放按钮手动播放');
+      showPlayerMessage('自动播放失败，请点击播放按钮手动播放', 'error');
     });
     
-    // Initialize custom controls
-    initializeCustomControls();
+    // Initialize custom controls (including Add to Playlist button listener)
+    initializeCustomControls(videoData); // Pass videoData
+  }
+
+  // Update playback history in chrome.storage.local
+  async function updatePlaybackHistory(videoData: any) {
+    const newHistoryItem: HistoryItem = {
+      title: videoData.title,
+      bvid: videoData.bvid,
+      audioUrl: videoData.audioUrl,
+      timestamp: new Date().toISOString(),
+    };
+
+    try {
+      const result = await chrome.storage.local.get('playbackHistory');
+      let history: HistoryItem[] = result.playbackHistory || [];
+
+      // Check for duplicates and remove if existing and not the most recent
+      const existingItemIndex = history.findIndex(item => 
+        (newHistoryItem.bvid && item.bvid === newHistoryItem.bvid) || 
+        (!newHistoryItem.bvid && item.audioUrl === newHistoryItem.audioUrl)
+      );
+
+      if (existingItemIndex !== -1) {
+        // If it's already the most recent item, do nothing
+        if (existingItemIndex === 0) {
+          console.log('Video is already the most recent in history.');
+          return;
+        }
+        // Remove the existing item
+        history.splice(existingItemIndex, 1);
+      }
+
+      // Add the new item to the beginning
+      history.unshift(newHistoryItem);
+
+      // Limit history to 100 items
+      if (history.length > 100) {
+        history = history.slice(0, 100);
+      }
+
+      await chrome.storage.local.set({ playbackHistory: history });
+      console.log('Playback history updated.');
+    } catch (error) {
+      console.error('Error updating playback history:', error);
+    }
   }
   
   // Initialize custom player controls
-  function initializeCustomControls() {
+  function initializeCustomControls(currentVideoData: any) { // Receive videoData
+    // Audio ended listener (for playlist progression)
+    audioPlayer.addEventListener('ended', () => {
+      if (isPlaylistMode && currentPlaylist) {
+        currentTrackIndex++;
+        if (currentTrackIndex < currentPlaylist.length) {
+          startOrContinuePlaylistPlayback();
+        } else {
+          // Playlist ended
+          isPlaylistMode = false;
+          showPlayerMessage('播放列表已结束。', 'info');
+          updatePlaylistUI(); // Hide playlist controls and info
+        }
+      }
+    });
+
+    // Next Track button listener
+    nextTrackBtn.addEventListener('click', () => {
+      if (isPlaylistMode && currentPlaylist && currentTrackIndex < currentPlaylist.length - 1) {
+        currentTrackIndex++;
+        startOrContinuePlaylistPlayback();
+      }
+    });
+
+    // Previous Track button listener
+    prevTrackBtn.addEventListener('click', () => {
+      if (isPlaylistMode && currentPlaylist && currentTrackIndex > 0) {
+        currentTrackIndex--;
+        startOrContinuePlaylistPlayback();
+      }
+    });
+    
     // Play/Pause button
     playPauseBtn.addEventListener('click', () => {
       if (audioPlayer.paused) {
@@ -142,6 +293,109 @@ document.addEventListener('DOMContentLoaded', () => {
     closeBtn.addEventListener('click', () => {
       window.close();
     });
+
+    // Add to Playlist button event listener (5)
+    addToPlaylistBtn.addEventListener('click', async () => {
+      if (!currentVideoData || !currentVideoData.audioUrl) {
+        showPlayerMessage('当前无视频信息可添加或移除。', 'error');
+        return;
+      }
+
+      const isCurrentlyFavorited = addToPlaylistBtn.classList.contains('is-favorited');
+
+      if (isCurrentlyFavorited) {
+        // --- Unfavorite Logic: Remove from all playlists ---
+        if (confirm("确定要从所有播放合集中移除此歌曲吗？此操作会将其从所有包含它的合集中移除。")) {
+          try {
+            const playlistsData = await chrome.storage.local.get('userPlaylists');
+            let playlists: Playlist[] = playlistsData.userPlaylists || [];
+            let modified = false;
+
+            playlists.forEach(playlist => {
+              const initialLength = playlist.items.length;
+              playlist.items = playlist.items.filter(item => 
+                !( (currentVideoData.bvid && item.bvid === currentVideoData.bvid) || 
+                   (!currentVideoData.bvid && item.audioUrl === currentVideoData.audioUrl) )
+              );
+              if (playlist.items.length < initialLength) {
+                playlist.updatedAt = new Date().toISOString();
+                modified = true;
+              }
+            });
+
+            if (modified) {
+              await chrome.storage.local.set({ userPlaylists: playlists });
+              showPlayerMessage('已从所有播放合集中移除。', 'success');
+            } else {
+              showPlayerMessage('歌曲未在任何播放合集中找到。', 'info'); // Should ideally not happen if icon was solid
+            }
+            updateFavoriteIcon(false);
+          } catch (error) {
+            console.error('Error removing from playlists:', error);
+            showPlayerMessage('从播放合集中移除失败。', 'error');
+          }
+        }
+      } else {
+        // --- Favorite Logic: Add to a selected playlist (existing logic) ---
+        try {
+          const playlistsData = await chrome.storage.local.get('userPlaylists');
+          const playlists: Playlist[] = playlistsData.userPlaylists || [];
+
+          if (playlists.length === 0) {
+            showPlayerMessage('请先在设置页面创建播放合集。', 'error');
+            return;
+          }
+
+          let promptMessage = "请选择要添加到的播放合集 (输入数字):\n";
+          playlists.forEach((p, index) => {
+            promptMessage += `${index + 1}. ${p.name}\n`;
+          });
+
+          const choiceStr = prompt(promptMessage);
+          if (choiceStr === null) return; // User cancelled
+
+          const choiceNum = parseInt(choiceStr, 10);
+          if (isNaN(choiceNum) || choiceNum < 1 || choiceNum > playlists.length) {
+            showPlayerMessage('无效的选择。', 'error');
+            return;
+          }
+
+          const selectedPlaylist = playlists[choiceNum - 1];
+
+          const isDuplicate = selectedPlaylist.items.some((item: PlaylistItem) => 
+            (currentVideoData.bvid && item.bvid === currentVideoData.bvid) ||
+            (!currentVideoData.bvid && item.audioUrl === currentVideoData.audioUrl)
+          );
+
+          if (isDuplicate) {
+            // If it's a duplicate in the *selected* playlist, still ensure the icon is filled
+            // because it implies it's favorited (even if the user tried to add to same playlist again).
+            showPlayerMessage(`"${currentVideoData.title}" 已存在于播放合集 "${selectedPlaylist.name}"。`, 'error');
+            updateFavoriteIcon(true); // Ensure icon reflects favorited status
+            return;
+          }
+
+          const newPlaylistItem: PlaylistItem = {
+            id: Date.now().toString(),
+            title: currentVideoData.title,
+            bvid: currentVideoData.bvid,
+            audioUrl: currentVideoData.audioUrl,
+            addedAt: new Date().toISOString(),
+          };
+
+          selectedPlaylist.items.push(newPlaylistItem);
+          selectedPlaylist.updatedAt = new Date().toISOString();
+
+          await chrome.storage.local.set({ userPlaylists: playlists });
+          showPlayerMessage(`已添加到播放合集 "${selectedPlaylist.name}"`, 'success');
+          updateFavoriteIcon(true); // Update icon to filled star
+
+        } catch (error) {
+          console.error('Error adding to playlist:', error);
+          showPlayerMessage('添加到播放合集失败。', 'error');
+        }
+      }
+    });
   }
   
   // Update volume level display
@@ -158,9 +412,70 @@ document.addEventListener('DOMContentLoaded', () => {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   }
   
-  // Show error message
-  function showError(message: string) {
-    errorMessage.textContent = message;
-    errorMessage.classList.add('show');
+  // Show player status message (4. Replaces showError)
+  function showPlayerMessage(message: string, type: 'success' | 'error' | 'info') {
+    if (!statusMessage) return;
+    statusMessage.textContent = message;
+    statusMessage.className = `status-message ${type}`; // Uses new class names from HTML
+    statusMessage.classList.add('show');
+
+    // Auto-hide after 3 seconds
+    setTimeout(() => {
+      statusMessage.classList.remove('show');
+      statusMessage.textContent = '';
+      statusMessage.className = 'status-message';
+    }, 3000);
+  }
+
+  // --- Favorite Icon Logic ---
+  function updateFavoriteIcon(isFavorited: boolean) {
+    if (addToPlaylistBtn) {
+      if (isFavorited) {
+        addToPlaylistBtn.classList.add('is-favorited');
+        addToPlaylistBtn.title = "已在播放合集中";
+      } else {
+        addToPlaylistBtn.classList.remove('is-favorited');
+        addToPlaylistBtn.title = "添加到播放合集";
+      }
+    }
+  }
+
+  async function checkIfVideoIsFavorited(currentVideoData: any): Promise<boolean> {
+    if (!currentVideoData || (!currentVideoData.bvid && !currentVideoData.audioUrl)) {
+      return false;
+    }
+    try {
+      const playlistsData = await chrome.storage.local.get('userPlaylists');
+      const playlists: Playlist[] = playlistsData.userPlaylists || [];
+
+      for (const playlist of playlists) {
+        const isPresent = playlist.items.some((item: PlaylistItem) => 
+          (currentVideoData.bvid && item.bvid === currentVideoData.bvid) ||
+          (!currentVideoData.bvid && item.audioUrl === currentVideoData.audioUrl)
+        );
+        if (isPresent) {
+          return true; // Found in at least one playlist
+        }
+      }
+    } catch (error) {
+      console.error('Error checking favorite status:', error);
+    }
+    return false; // Not found in any playlist
+  }
+  // --- End Favorite Icon Logic ---
+
+  // Function to update playlist UI elements
+  function updatePlaylistUI() {
+    if (isPlaylistMode && currentPlaylistName && currentPlaylist) {
+      playlistInfoDiv.style.display = 'block';
+      playlistNameEl.textContent = `播放列表: ${currentPlaylistName}`;
+      playlistTrackIndicatorEl.textContent = `曲目 ${currentTrackIndex + 1} / ${currentPlaylist.length}`;
+      prevTrackBtn.style.display = 'inline-block';
+      nextTrackBtn.style.display = 'inline-block';
+    } else {
+      playlistInfoDiv.style.display = 'none';
+      prevTrackBtn.style.display = 'none';
+      nextTrackBtn.style.display = 'none';
+    }
   }
 });

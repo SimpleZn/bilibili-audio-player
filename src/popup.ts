@@ -1,3 +1,4 @@
+/// <reference types="chrome" />
 // Popup page script
 import {
   getBilibiliAudio,

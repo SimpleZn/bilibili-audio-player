@@ -66,7 +66,7 @@ document.addEventListener('DOMContentLoaded', () => {
       currentPlaylist = null;
       currentPlaylistName = null;
       currentTrackIndex = -1;
-      videoData = message.data; // Assign to the module-level videoData
+      videoData = message.data as CurrentTrackData; // Assign to the module-level videoData
       initializePlayer(videoData);
       updatePlaylistUI();
     }

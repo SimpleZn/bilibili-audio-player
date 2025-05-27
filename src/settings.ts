@@ -1,5 +1,5 @@
 // Settings page script
-import { Playlist, PlaylistItem } from './utils/playlistTypes'; // 1. Import Playlist Types
+import { Playlist, PlaylistItem } from "./utils/playlistTypes"; // 1. Import Playlist Types
 
 interface HistoryItem {
   title: string;
@@ -8,26 +8,43 @@ interface HistoryItem {
   timestamp: string;
 }
 
-document.addEventListener('DOMContentLoaded', async () => {
-  const sessdataInput = document.getElementById('sessdata') as HTMLInputElement;
-  const saveButton = document.getElementById('save-btn') as HTMLButtonElement;
-  const statusDiv = document.getElementById('status') as HTMLDivElement;
+document.addEventListener("DOMContentLoaded", async () => {
+  const sessdataInput = document.getElementById("sessdata") as HTMLInputElement;
+  const saveButton = document.getElementById("save-btn") as HTMLButtonElement;
+  const statusDiv = document.getElementById("status") as HTMLDivElement;
 
   // Playlist Management DOM Elements (2)
-  const newPlaylistNameInput = document.getElementById('new-playlist-name') as HTMLInputElement;
-  const createPlaylistBtn = document.getElementById('create-playlist-btn') as HTMLButtonElement;
-  const playlistListContainer = document.getElementById('playlist-list-container') as HTMLDivElement;
-  const playlistManagementSection = playlistListContainer ? playlistListContainer.parentElement as HTMLDivElement : null; // Assuming .section-container
+  const newPlaylistNameInput = document.getElementById(
+    "new-playlist-name"
+  ) as HTMLInputElement;
+  const createPlaylistBtn = document.getElementById(
+    "create-playlist-btn"
+  ) as HTMLButtonElement;
+  const playlistListContainer = document.getElementById(
+    "playlist-list-container"
+  ) as HTMLDivElement;
+  const playlistManagementSection = playlistListContainer
+    ? (playlistListContainer.parentElement as HTMLDivElement)
+    : null; // Assuming .section-container
 
   // Playlist Items View DOM Elements (1)
-  const playlistItemsView = document.getElementById('playlist-items-view') as HTMLDivElement;
-  const playlistItemsTitle = document.getElementById('playlist-items-title') as HTMLHeadingElement;
-  const backToPlaylistsBtn = document.getElementById('back-to-playlists-btn') as HTMLButtonElement;
-  const playlistItemsList = document.getElementById('playlist-items-list') as HTMLUListElement;
+  const playlistItemsView = document.getElementById(
+    "playlist-items-view"
+  ) as HTMLDivElement;
+  const playlistItemsTitle = document.getElementById(
+    "playlist-items-title"
+  ) as HTMLHeadingElement;
+  const backToPlaylistsBtn = document.getElementById(
+    "back-to-playlists-btn"
+  ) as HTMLButtonElement;
+  const playlistItemsList = document.getElementById(
+    "playlist-items-list"
+  ) as HTMLUListElement;
 
   // Full History DOM Elements
   const fullHistoryListEl = document.getElementById('full-history-list') as HTMLUListElement;
   const noFullHistoryMessageEl = document.getElementById('no-full-history-message') as HTMLParagraphElement;
+  const clearFullHistoryBtn = document.getElementById('clear-full-history-btn') as HTMLButtonElement; // 新增清空历史按钮
 
   // Copied from popup.ts (or should be from a shared util)
   function formatRelativeTime(isoTimestamp: string): string {
@@ -59,7 +76,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       statusDiv.className = 'status';
     }, 3000);
   }
-  
+
   // Load existing SESSDATA settings
   try {
     const { authConfig } = await chrome.storage.sync.get('authConfig');
@@ -190,7 +207,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       await chrome.storage.local.set({ userPlaylists: playlists });
       
       newPlaylistNameInput.value = ''; // Clear input
-      showStatus(`播放合集 "${name}" 创建成功！`, 'success');
+      showStatus(`播放合集 \"${name}\" 创建成功！`, 'success');
       await loadPlaylists(); // Refresh list
     } catch (error) {
       console.error('Error creating playlist:', error);
@@ -457,6 +474,22 @@ document.addEventListener('DOMContentLoaded', async () => {
       noFullHistoryMessageEl.style.display = 'block';
       fullHistoryListEl.style.display = 'none';
     }
+  }
+
+  // 新增清空历史功能
+  if (clearFullHistoryBtn) {
+    clearFullHistoryBtn.addEventListener('click', async () => {
+      if (confirm('确定要清空所有播放历史吗？此操作无法撤销。')) {
+        try {
+          await chrome.storage.local.remove('playbackHistory');
+          showStatus('播放历史已清空', 'success');
+          await displayFullPlaybackHistory(); // Refresh the list
+        } catch (error) {
+          console.error('Error clearing playback history:', error);
+          showStatus('清空历史失败', 'error');
+        }
+      }
+    });
   }
 
   displayFullPlaybackHistory();

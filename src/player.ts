@@ -1,12 +1,23 @@
 // Player page script
+import { Playlist, PlaylistItem } from '../utils/playlistTypes'; // 1. Import Playlist Types
+
+// Define the HistoryItem interface
+interface HistoryItem {
+  title: string;
+  bvid?: string;
+  audioUrl: string;
+  timestamp: string; // ISO string format for date/time
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   const audioPlayer = document.getElementById('audio-player') as HTMLAudioElement;
   const headerTitle = document.getElementById('header-title') as HTMLHeadingElement;
   const videoTitle = document.getElementById('video-title') as HTMLDivElement;
   const videoId = document.getElementById('video-id') as HTMLDivElement;
-  const errorMessage = document.getElementById('error-message') as HTMLDivElement;
+  const statusMessage = document.getElementById('status-message') as HTMLDivElement; // 2. Updated DOM ref
   const settingsBtn = document.getElementById('settings-btn') as HTMLButtonElement;
   const closeBtn = document.getElementById('close-btn') as HTMLButtonElement;
+  const addToPlaylistBtn = document.getElementById('add-to-playlist-btn') as HTMLButtonElement; // 2. New DOM ref
   
   // Custom player controls
   const playPauseBtn = document.getElementById('play-pause-btn') as HTMLButtonElement;
@@ -44,19 +55,25 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   
   // Initialize player with video data
-  function initializePlayer(data: any) {
+  async function initializePlayer(data: any) { // data is the videoData for current video
     if (!data || !data.audioUrl) {
-      showError('无法加载音频数据');
+      showPlayerMessage('无法加载音频数据', 'error');
       return;
     }
     
+    // Store videoData at module level for access by other functions
+    videoData = data; // Ensure videoData is assigned here
+
+    // Update playback history
+    await updatePlaybackHistory(videoData); // Pass videoData explicitly
+    
     // Set video info
-    headerTitle.textContent = data.title;
-    videoTitle.textContent = data.title;
-    videoId.textContent = `BV: ${data.bvid}`;
+    headerTitle.textContent = videoData.title;
+    videoTitle.textContent = videoData.title;
+    videoId.textContent = `BV: ${videoData.bvid}`;
     
     // Set audio source
-    audioPlayer.src = data.audioUrl;
+    audioPlayer.src = videoData.audioUrl;
     audioPlayer.volume = 0.7; // Default volume
     
     // Update volume level display
@@ -65,15 +82,59 @@ document.addEventListener('DOMContentLoaded', () => {
     // Auto play
     audioPlayer.play().catch(error => {
       console.error('Auto-play failed:', error);
-      showError('自动播放失败，请点击播放按钮手动播放');
+      showPlayerMessage('自动播放失败，请点击播放按钮手动播放', 'error');
     });
     
-    // Initialize custom controls
-    initializeCustomControls();
+    // Initialize custom controls (including Add to Playlist button listener)
+    initializeCustomControls(videoData); // Pass videoData
+  }
+
+  // Update playback history in chrome.storage.local
+  async function updatePlaybackHistory(videoData: any) {
+    const newHistoryItem: HistoryItem = {
+      title: videoData.title,
+      bvid: videoData.bvid,
+      audioUrl: videoData.audioUrl,
+      timestamp: new Date().toISOString(),
+    };
+
+    try {
+      const result = await chrome.storage.local.get('playbackHistory');
+      let history: HistoryItem[] = result.playbackHistory || [];
+
+      // Check for duplicates and remove if existing and not the most recent
+      const existingItemIndex = history.findIndex(item => 
+        (newHistoryItem.bvid && item.bvid === newHistoryItem.bvid) || 
+        (!newHistoryItem.bvid && item.audioUrl === newHistoryItem.audioUrl)
+      );
+
+      if (existingItemIndex !== -1) {
+        // If it's already the most recent item, do nothing
+        if (existingItemIndex === 0) {
+          console.log('Video is already the most recent in history.');
+          return;
+        }
+        // Remove the existing item
+        history.splice(existingItemIndex, 1);
+      }
+
+      // Add the new item to the beginning
+      history.unshift(newHistoryItem);
+
+      // Limit history to 100 items
+      if (history.length > 100) {
+        history = history.slice(0, 100);
+      }
+
+      await chrome.storage.local.set({ playbackHistory: history });
+      console.log('Playback history updated.');
+    } catch (error) {
+      console.error('Error updating playback history:', error);
+    }
   }
   
   // Initialize custom player controls
-  function initializeCustomControls() {
+  function initializeCustomControls(currentVideoData: any) { // Receive videoData
     // Play/Pause button
     playPauseBtn.addEventListener('click', () => {
       if (audioPlayer.paused) {
@@ -142,6 +203,69 @@ document.addEventListener('DOMContentLoaded', () => {
     closeBtn.addEventListener('click', () => {
       window.close();
     });
+
+    // Add to Playlist button event listener (5)
+    addToPlaylistBtn.addEventListener('click', async () => {
+      if (!currentVideoData || !currentVideoData.audioUrl) {
+        showPlayerMessage('当前无视频信息可添加。', 'error');
+        return;
+      }
+
+      try {
+        const playlistsData = await chrome.storage.local.get('userPlaylists');
+        const playlists: Playlist[] = playlistsData.userPlaylists || [];
+
+        if (playlists.length === 0) {
+          showPlayerMessage('请先在设置页面创建播放合集。', 'error');
+          return;
+        }
+
+        let promptMessage = "请选择要添加到的播放合集 (输入数字):\n";
+        playlists.forEach((p, index) => {
+          promptMessage += `${index + 1}. ${p.name}\n`;
+        });
+
+        const choiceStr = prompt(promptMessage);
+        if (choiceStr === null) return; // User cancelled
+
+        const choiceNum = parseInt(choiceStr, 10);
+        if (isNaN(choiceNum) || choiceNum < 1 || choiceNum > playlists.length) {
+          showPlayerMessage('无效的选择。', 'error');
+          return;
+        }
+
+        const selectedPlaylist = playlists[choiceNum - 1];
+
+        // Duplicate check within selected playlist
+        const isDuplicate = selectedPlaylist.items.some(item => 
+          (currentVideoData.bvid && item.bvid === currentVideoData.bvid) ||
+          (!currentVideoData.bvid && item.audioUrl === currentVideoData.audioUrl)
+        );
+
+        if (isDuplicate) {
+          showPlayerMessage(`"${currentVideoData.title}" 已存在于播放合集 "${selectedPlaylist.name}"。`, 'error');
+          return;
+        }
+
+        const newPlaylistItem: PlaylistItem = {
+          id: Date.now().toString(),
+          title: currentVideoData.title,
+          bvid: currentVideoData.bvid,
+          audioUrl: currentVideoData.audioUrl,
+          addedAt: new Date().toISOString(),
+        };
+
+        selectedPlaylist.items.push(newPlaylistItem);
+        selectedPlaylist.updatedAt = new Date().toISOString();
+
+        await chrome.storage.local.set({ userPlaylists: playlists });
+        showPlayerMessage(`已添加到播放合集 "${selectedPlaylist.name}"`, 'success');
+
+      } catch (error) {
+        console.error('Error adding to playlist:', error);
+        showPlayerMessage('添加到播放合集失败。', 'error');
+      }
+    });
   }
   
   // Update volume level display
@@ -158,9 +282,18 @@ document.addEventListener('DOMContentLoaded', () => {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   }
   
-  // Show error message
-  function showError(message: string) {
-    errorMessage.textContent = message;
-    errorMessage.classList.add('show');
+  // Show player status message (4. Replaces showError)
+  function showPlayerMessage(message: string, type: 'success' | 'error') {
+    if (!statusMessage) return;
+    statusMessage.textContent = message;
+    statusMessage.className = `status-message ${type}`; // Uses new class names from HTML
+    statusMessage.classList.add('show');
+
+    // Auto-hide after 3 seconds
+    setTimeout(() => {
+      statusMessage.classList.remove('show');
+      statusMessage.textContent = '';
+      statusMessage.className = 'status-message';
+    }, 3000);
   }
 });

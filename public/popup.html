@@ -27,7 +27,7 @@
       padding-bottom: 10px;
     }
     .form-group {
-      margin-bottom: 15px;
+      margin-bottom: 15px; /* Standardized, already 15px, confirmed */
     }
     label {
       display: block;
@@ -56,6 +56,14 @@
     }
     button:hover {
       background-color: #e45f8a;
+    }
+    button#play-current-btn, button#clear-history-btn { /* Standardize secondary buttons */
+        padding: 8px 12px;
+        font-size: 12px;
+        width: auto; /* Allow them to not be full width if they are inline or part of a group */
+    }
+    button#clear-history-btn { /* If it should be full width like primary button */
+        width: 100%; 
     }
     button:disabled {
       background-color: #cccccc;
@@ -139,6 +147,14 @@
     
     <button id="extract-btn">提取并播放音频</button>
     <div id="status" class="status"></div>
+
+    <div id="history-section" class="container-section">
+      <h2>播放历史</h2>
+      <ul id="history-list">
+        <!-- History items will be populated here -->
+      </ul>
+      <button id="clear-history-btn" class="secondary-btn">清空播放历史</button>
+    </div>
     
     <div class="footer">
       <a href="settings.html" target="_blank">设置</a> | 

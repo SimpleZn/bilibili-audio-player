@@ -6,8 +6,9 @@
 export interface PlaylistItem {
   id: string;          // Unique ID for the playlist item (e.g., UUID or timestamp-based)
   title: string;
-  bvid?: string;       // Optional Bilibili Video ID
-  audioUrl: string;
+  bvid: string;       // Bilibili Video ID (should be primary identifier)
+  cid: string;         // Bilibili Content ID (for multi-part videos)
+  audioUrl?: string;   // Optional: stores the most recently fetched audio URL
   addedAt: string;     // ISO date string, when the item was added to this playlist
 }
 

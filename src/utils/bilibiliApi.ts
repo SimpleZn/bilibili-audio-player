@@ -1,18 +1,7 @@
 /**
  * Bilibili API utilities for extracting audio URLs from video pages
  */
-
-interface BilibiliVideoInfo {
-  title: string;
-  aid: string;
-  cid: string;
-  bvid: string;
-  audioUrl: string;
-}
-
-interface AuthConfig {
-  SESSDATA: string;
-}
+import { BilibiliVideoInfo, AuthConfig } from './types'; // Import shared types
 
 /**
  * Extract video ID (BV or AV) from Bilibili URL

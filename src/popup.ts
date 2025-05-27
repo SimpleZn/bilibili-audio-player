@@ -3,9 +3,10 @@
 import {
   getBilibiliAudio,
   isBilibiliVideoPage,
-  loadAuthConfig,
+  loadAuthConfig
 } from "./utils/bilibiliApi";
 import { Playlist } from "./utils/playlistTypes"; // Import Playlist type
+import { HistoryItem, BilibiliVideoInfo, AuthConfig } from "./utils/types"; // Import shared types
 
 document.addEventListener("DOMContentLoaded", async () => {
   const videoUrlInput = document.getElementById(
@@ -33,16 +34,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   ) as HTMLUListElement; // Added
 
   let currentTabUrl = "";
-  let currentVideoData: any = null; // This will now store BilibiliVideoInfo
-
-  // Define the HistoryItem interface (consistent with player.ts)
-  interface HistoryItem {
-    title: string;
-    bvid: string; // Bilibili Video ID (should be primary identifier)
-    cid: string;  // Bilibili Content ID
-    audioUrl?: string; // Optional: most recently fetched audio URL
-    timestamp: string;
-  }
+  let currentVideoData: BilibiliVideoInfo | null = null; // Use imported BilibiliVideoInfo
 
   // Helper function to format ISO date string to relative time
   function formatRelativeTime(isoTimestamp: string): string {
@@ -147,7 +139,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // Function to open player window
-  async function openPlayerWindow(videoData: BilibiliVideoInfo) { // Expect BilibiliVideoInfo
+  async function openPlayerWindow(videoData: BilibiliVideoInfo) { // Use imported BilibiliVideoInfo
     const playerUrl = chrome.runtime.getURL("player.html");
     let existingPlayerWindow: chrome.windows.Window | undefined = undefined;
     let playerTabId: number | undefined = undefined;
@@ -191,7 +183,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // Helper function to create a new player window
-  function createNewPlayerWindow(videoData: BilibiliVideoInfo, playerUrl: string) { // Expect BilibiliVideoInfo
+  function createNewPlayerWindow(videoData: BilibiliVideoInfo, playerUrl: string) { // Use imported BilibiliVideoInfo
     chrome.windows.create(
       {
         url: playerUrl,
@@ -265,14 +257,6 @@ document.addEventListener("DOMContentLoaded", async () => {
         );
       });
     });
-  }
-  // Define BilibiliVideoInfo interface locally if not imported (though it's better to share types)
-  interface BilibiliVideoInfo {
-    title: string;
-    aid: string;
-    cid: string;
-    bvid: string;
-    audioUrl: string;
   }
 
   // --- Playback History Functions ---

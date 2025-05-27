@@ -132,6 +132,45 @@
         padding: 15px;
     }
     /* End of Playlist Management Styles */
+
+    /* Styles for Full History */
+    #full-history-list {
+      list-style-type: none;
+      padding: 0;
+      max-height: 450px; /* Adjust as needed */
+      overflow-y: auto;
+      border: 1px solid #eee; /* Optional border around the list */
+      border-radius: 4px;
+    }
+    .full-history-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 12px; /* Slightly more padding than popup */
+      border-bottom: 1px solid #f0f0f0; /* Separator line */
+      cursor: pointer;
+      background-color: #fff;
+    }
+    .full-history-item:last-child {
+      border-bottom: none; /* No line for the last item */
+    }
+    .full-history-item:hover {
+      background-color: #f9f9f9;
+    }
+    .full-history-title {
+      font-weight: 500; /* Or normal if preferred */
+      flex-grow: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-right: 15px; /* More spacing */
+    }
+    .full-history-timestamp {
+      font-size: 0.9em;
+      color: #555; /* Slightly darker than popup for better readability on settings bg */
+      white-space: nowrap;
+    }
+    /* End of Full History Styles */
   </style>
 </head>
 <body>
@@ -176,6 +215,14 @@
     <ul id="playlist-items-list">
       <!-- Playlist items will be rendered here -->
     </ul>
+  </div>
+
+  <div class="container" id="full-history-section" style="margin-top: 20px;">
+    <h2>播放历史记录</h2>
+    <ul id="full-history-list">
+      <!-- Full history items will be populated here -->
+    </ul>
+    <p id="no-full-history-message" style="display:none; text-align:center; color: #666; padding: 15px;">暂无播放历史记录。</p>
   </div>
 
   <script src="settings.js"></script>

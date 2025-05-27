@@ -195,6 +195,15 @@
     }
     /* End Status Message Styling */
 
+    .playlist-meta {
+        font-size: 0.9em;
+        color: #666; /* Adjusted for better visibility on light background */
+        margin: 2px 0;
+    }
+    #playlist-info {
+        margin-bottom: 5px;
+    }
+
     .error-message {
       background-color: #fdecea;
       color: #c62828;
@@ -232,6 +241,10 @@
     <div class="status-message" id="status-message"></div> <!-- Changed from error-message for generic use -->
     
     <div class="video-info">
+      <div id="playlist-info" style="display: none;">
+        <p id="playlist-name" class="playlist-meta"></p>
+        <p id="playlist-track-indicator" class="playlist-meta"></p>
+      </div>
       <div class="video-title" id="video-title">加载中...</div>
       <div class="video-id" id="video-id"></div>
     </div>
@@ -241,6 +254,12 @@
     <div class="custom-controls">
       <button class="play-pause" id="play-pause-btn">
         <i class="icon-play" id="play-icon"></i>
+      </button>
+      <button id="prev-track-btn" class="icon-btn" title="上一首" style="display: none;">
+        <svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M7 6 L7 18 L5 18 L5 6 L7 6 Z M17 6 L17 18 L15 12 L17 6 Z"/></svg>
+      </button>
+      <button id="next-track-btn" class="icon-btn" title="下一首" style="display: none;">
+        <svg viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M17 6 L17 18 L19 18 L19 6 L17 6 Z M7 6 L7 18 L9 12 L7 6 Z"/></svg>
       </button>
       
       <div class="progress-container" id="progress-container">

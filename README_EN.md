@@ -6,14 +6,16 @@ Read this in: [中文](README.md) | [English](README_EN.md)
 
 Bilibili Audio Player is a Chrome extension that extracts audio from Bilibili videos and plays it independently. Key features include:
 
-1.  Extracts audio URLs from Bilibili video URLs.
+1.  Extracts audio URLs from Bilibili video URLs, **utilizing an on-demand fetching mechanism to prevent expired links**.
 2.  Plays audio independently; closing the Bilibili video page does not affect audio playback.
-3.  Supports authentication via SESSDATA to access videos requiring login.
-4.  Automatically detects if the current page is a Bilibili video page.
-5.  Provides a floating button, popup window, and a standalone player window.
-6.  **Playback History:** Automatically records recently played audio. View and replay your listening history in the extension popup, with an option to clear the history.
-7.  **Custom Playlists:** Create and manage your own audio collections.
+3.  **Player Window Reuse**: Prefers to use an already open player window, avoiding duplicate windows.
+4.  Supports authentication via SESSDATA to access videos requiring login.
+5.  Automatically detects if the current page is a Bilibili video page.
+6.  Provides a floating button, popup window, and a standalone player window (with smoother custom dialogs).
+7.  **Playback History:** Automatically records recently played audio (stored by video ID for persistence). View and replay your listening history in the extension popup, with support for viewing full history and clearing it on the settings page.
+8.  **Custom Playlists:** Create and manage your own audio collections.
     *   Create, rename, and delete playlists on the settings page.
+    *   **Manually add videos to a specific playlist by pasting a Bilibili video URL on the settings page**.
     *   Add the currently playing audio to a playlist directly from the player.
     *   View playlist contents and play audio from them on the settings page.
 

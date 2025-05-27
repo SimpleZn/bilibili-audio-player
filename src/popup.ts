@@ -33,13 +33,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   ) as HTMLUListElement; // Added
 
   let currentTabUrl = "";
-  let currentVideoData: any = null;
+  let currentVideoData: any = null; // This will now store BilibiliVideoInfo
 
   // Define the HistoryItem interface (consistent with player.ts)
   interface HistoryItem {
     title: string;
-    bvid?: string;
-    audioUrl: string;
+    bvid: string; // Bilibili Video ID (should be primary identifier)
+    cid: string;  // Bilibili Content ID
+    audioUrl?: string; // Optional: most recently fetched audio URL
     timestamp: string;
   }
 
@@ -146,7 +147,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // Function to open player window
-  async function openPlayerWindow(videoData: any) {
+  async function openPlayerWindow(videoData: BilibiliVideoInfo) { // Expect BilibiliVideoInfo
     const playerUrl = chrome.runtime.getURL("player.html");
     let existingPlayerWindow: chrome.windows.Window | undefined = undefined;
     let playerTabId: number | undefined = undefined;
@@ -190,7 +191,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // Helper function to create a new player window
-  function createNewPlayerWindow(videoData: any, playerUrl: string) {
+  function createNewPlayerWindow(videoData: BilibiliVideoInfo, playerUrl: string) { // Expect BilibiliVideoInfo
     chrome.windows.create(
       {
         url: playerUrl,
@@ -228,14 +229,50 @@ document.addEventListener("DOMContentLoaded", async () => {
     statusDiv.textContent = message;
     statusDiv.className = `status ${type}`;
 
+    // Clear message after a delay, but not for errors that need user attention
     if (type === "success" || type === "info") {
-      // Also hide info messages after a delay
       setTimeout(() => {
-        statusDiv.style.display = "none";
-        statusDiv.textContent = ""; // Clear text
-        statusDiv.className = "status"; // Reset class
+        // Check if the message is still the one we set, to avoid clearing a new message
+        if (statusDiv.textContent === message) {
+            statusDiv.textContent = "";
+            statusDiv.className = "status";
+            statusDiv.style.display = "none"; // Hide it again if it was only info/success
+        }
       }, 3000);
+    } else if (type === "error") {
+        statusDiv.style.display = "block"; // Ensure errors are visible
     }
+  }
+
+  // --- Helper to fetch fresh video info via Background --- 
+  async function fetchFreshVideoInfoFromBackground(bvid: string, cid?: string): Promise<BilibiliVideoInfo | null> {
+    return new Promise((resolve) => {
+      // Construct a URL. If cid is crucial for disambiguation, the API call might need adjustment.
+      // For now, getBilibiliAudio in background takes a URL and can re-derive cid.
+      const videoUrl = `https://www.bilibili.com/video/${bvid}`;
+      // Auth config should be loaded here to pass to background, or background loads it.
+      loadAuthConfig().then(authConfig => {
+        chrome.runtime.sendMessage(
+          { action: "getBilibiliAudio", url: videoUrl, authConfig: authConfig }, // `cid` could be passed if needed by background
+          (response) => {
+            if (chrome.runtime.lastError) {
+              console.error("Error fetching fresh video info from background:", chrome.runtime.lastError.message);
+              resolve(null);
+            } else {
+              resolve(response as BilibiliVideoInfo | null);
+            }
+          }
+        );
+      });
+    });
+  }
+  // Define BilibiliVideoInfo interface locally if not imported (though it's better to share types)
+  interface BilibiliVideoInfo {
+    title: string;
+    aid: string;
+    cid: string;
+    bvid: string;
+    audioUrl: string;
   }
 
   // --- Playback History Functions ---
@@ -283,12 +320,15 @@ document.addEventListener("DOMContentLoaded", async () => {
         li.appendChild(titleSpan);
         li.appendChild(timestampSpan);
 
-        li.addEventListener("click", () => {
-          openPlayerWindow({
-            audioUrl: item.audioUrl,
-            title: item.title,
-            bvid: item.bvid || "",
-          });
+        li.addEventListener("click", async () => {
+          showStatus(`正在加载: ${item.title}`, "info");
+          const freshInfo = await fetchFreshVideoInfoFromBackground(item.bvid, item.cid);
+          if (freshInfo) {
+            openPlayerWindow(freshInfo);
+            // showStatus("已发送到播放器!", "success"); // openPlayerWindow handles its own status
+          } else {
+            showStatus(`无法加载 "${item.title}"。请检查视频是否有效或需要登录。`, "error");
+          }
         });
         historyList.appendChild(li);
       });
@@ -357,8 +397,10 @@ document.addEventListener("DOMContentLoaded", async () => {
 
             if (selectedPlaylist) {
               if (selectedPlaylist.items && selectedPlaylist.items.length > 0) {
-                openPlayerWindowForPlaylist(selectedPlaylist, 0); // Start from the first item
-                // showStatus(`Playing collection: ${selectedPlaylist.name}`, 'info'); // Optional: feedback
+                // For playing a playlist, player.ts now handles fetching fresh URLs for each item.
+                // So, popup.ts just needs to send the playlist (with bvid/cid for each item).
+                // No need to pre-fetch all URLs here; player.ts does it one-by-one.
+                openPlayerWindowForPlaylist(selectedPlaylist, 0); 
               } else {
                 showStatus(
                   `Collection "${selectedPlaylist.name}" is empty. Add songs in Settings.`,
@@ -400,7 +442,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   displayCollections(); // Added
 
   async function openPlayerWindowForPlaylist(
-    playlist: Playlist,
+    playlist: Playlist, // Playlist items now have bvid/cid, audioUrl is optional
     startIndex: number = 0
   ) {
     const playerUrl = chrome.runtime.getURL("player.html");

@@ -1,11 +1,27 @@
 // Settings page script
 import { Playlist, PlaylistItem } from "./utils/playlistTypes"; // 1. Import Playlist Types
+import { getBilibiliAudio as fetchBilibiliAudioUtil, loadAuthConfig } from "./utils/bilibiliApi"; // For direct call if needed, or for type info
 
 interface HistoryItem {
   title: string;
-  bvid?: string;
-  audioUrl: string;
+  bvid: string; // Bilibili Video ID (should be primary identifier)
+  cid: string;  // Bilibili Content ID
+  audioUrl?: string; // Optional: most recently fetched audio URL
   timestamp: string;
+}
+
+// Define BilibiliVideoInfo interface (mirroring from other files, ideally shared)
+interface BilibiliVideoInfo {
+  title: string;
+  aid: string;
+  cid: string;
+  bvid: string;
+  audioUrl: string;
+}
+
+// Define AuthConfig interface (mirroring from other files, ideally shared)
+interface AuthConfig {
+  SESSDATA: string;
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
@@ -64,17 +80,20 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // --- Utility to show status messages ---
-  function showStatus(message: string, type: 'success' | 'error') {
+  function showStatus(message: string, type: 'success' | 'error' | 'info', duration: number = 3000) {
     statusDiv.textContent = message;
     statusDiv.className = `status ${type}`;
-    statusDiv.style.display = 'block'; // Make sure it's visible
+    statusDiv.style.display = 'block';
 
-    // Hide message after 3 seconds
-    setTimeout(() => {
-      statusDiv.style.display = 'none';
-      statusDiv.textContent = '';
-      statusDiv.className = 'status';
-    }, 3000);
+    if (duration > 0) {
+        setTimeout(() => {
+            if (statusDiv.textContent === message) { // Avoid clearing a newer message
+                statusDiv.style.display = 'none';
+                statusDiv.textContent = '';
+                statusDiv.className = 'status';
+            }
+        }, duration);
+    }
   }
 
   // Load existing SESSDATA settings
@@ -104,16 +123,86 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // --- Playlist Management ---
 
-  function _playHistoryItem(item: { title: string; audioUrl: string; bvid?: string }) {
-    const playerUrl = chrome.runtime.getURL(
-      `player.html?audioUrl=${encodeURIComponent(item.audioUrl)}&title=${encodeURIComponent(item.title)}&bvid=${encodeURIComponent(item.bvid || '')}`
-    );
-    chrome.windows.create({
-      url: playerUrl,
-      type: 'popup',
-      width: 400,
-      height: 600
+  // Helper to fetch fresh video info via Background script
+  async function fetchFreshVideoInfoFromBackground(bvid: string, cidGiven?: string): Promise<BilibiliVideoInfo | null> {
+    return new Promise((resolve) => {
+      const videoUrl = `https://www.bilibili.com/video/${bvid}`;
+      loadAuthConfig().then(authConfig => {
+        chrome.runtime.sendMessage(
+          { action: "getBilibiliAudio", url: videoUrl, authConfig: authConfig, cid: cidGiven }, 
+          (response) => {
+            if (chrome.runtime.lastError) {
+              console.error("Error fetching fresh video info from background:", chrome.runtime.lastError.message);
+              resolve(null);
+            } else {
+              resolve(response as BilibiliVideoInfo | null);
+            }
+          }
+        );
+      }).catch(error => {
+        console.error("Error loading auth config for fetching video info:", error);
+        resolve(null);
+      });
     });
+  }
+
+  // Refactored function to open/send data to player window
+  // This is a simplified version based on popup.ts's logic
+  async function openOrUpdatePlayerWindow(videoData: BilibiliVideoInfo) {
+    const playerUrl = chrome.runtime.getURL("player.html");
+    let existingPlayerWindow: chrome.windows.Window | undefined = undefined;
+    let playerTabId: number | undefined = undefined;
+
+    try {
+      const windows = await chrome.windows.getAll({ populate: true, windowTypes: ["popup", "normal"] });
+      existingPlayerWindow = windows.find(win => 
+        win.tabs?.some(tab => tab.url === playerUrl && tab.id !== undefined)
+      );
+      if (existingPlayerWindow) {
+        playerTabId = existingPlayerWindow.tabs?.find(tab => tab.url === playerUrl)?.id;
+      }
+    } catch (error) {
+      console.error("Error searching for existing player window:", error);
+    }
+
+    if (existingPlayerWindow && playerTabId) {
+      try {
+        await chrome.windows.update(existingPlayerWindow.id!, { focused: true });
+        await chrome.tabs.sendMessage(playerTabId, { action: "playAudio", data: videoData });
+        await chrome.storage.local.set({ activePlayerWindowId: existingPlayerWindow.id });
+        showStatus('已发送到播放器。', 'success');
+      } catch (error) {
+        console.error("Error reusing existing player window:", error);
+        await chrome.storage.local.remove("activePlayerWindowId");
+        _createNewPlayerViaMessage(videoData, playerUrl);
+      }
+    } else {
+      _createNewPlayerViaMessage(videoData, playerUrl);
+    }
+  }
+
+  function _createNewPlayerViaMessage(videoData: BilibiliVideoInfo, playerUrl: string) {
+    chrome.windows.create(
+      { url: playerUrl, type: "popup", width: 400, height: 600 },
+      async (window) => {
+        if (window && window.tabs && window.tabs[0] && window.tabs[0].id) {
+          const tabId = window.tabs[0].id;
+          await chrome.storage.local.set({ activePlayerWindowId: window.id });
+          setTimeout(() => {
+            chrome.tabs.sendMessage(tabId, { action: "playAudio", data: videoData }, () => {
+              if (chrome.runtime.lastError) {
+                console.error("Error sending playAudio message to new window:", chrome.runtime.lastError.message);
+                showStatus('播放器通信错误', 'error');
+              } else {
+                showStatus('已发送到新播放器。', 'success');
+              }
+            });
+          }, 500); 
+        } else {
+          showStatus('无法创建播放器窗口。', 'error');
+        }
+      }
+    );
   }
 
   // 3. loadPlaylists Function
@@ -373,18 +462,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // _playPlaylistItem Function (4)
-  function _playPlaylistItem(item: PlaylistItem) {
-    // Open player window with the item data
-    // This is similar to background.ts or popup.ts logic for opening player
-    const playerUrl = chrome.runtime.getURL(
-      `player.html?audioUrl=${encodeURIComponent(item.audioUrl)}&title=${encodeURIComponent(item.title)}&bvid=${item.bvid || ''}`
-    );
-    chrome.windows.create({
-      url: playerUrl,
-      type: 'popup',
-      width: 400,
-      height: 600
-    });
+  async function _playPlaylistItem(item: PlaylistItem) {
+    showStatus(`正在加载: ${item.title}`, 'info', 0); // Show loading, 0 duration = manual clear or replaced
+    const freshInfo = await fetchFreshVideoInfoFromBackground(item.bvid, item.cid);
+    if (freshInfo) {
+      openOrUpdatePlayerWindow(freshInfo);
+      // status message will be handled by openOrUpdatePlayerWindow or if it fails here
+    } else {
+      showStatus(`无法加载 "${item.title}"。请检查视频是否有效或需要登录。`, "error");
+    }
   }
 
   // _removePlaylistItem Function (6)
@@ -420,77 +506,76 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
+  // --- Full Playback History --- (8)
   async function displayFullPlaybackHistory() {
-    if (!fullHistoryListEl || !noFullHistoryMessageEl) return;
+    if (!fullHistoryListEl || !noFullHistoryMessageEl || !clearFullHistoryBtn) return;
 
     try {
-      const result = await chrome.storage.local.get('playbackHistory');
+      const result = await chrome.storage.local.get("playbackHistory");
       const history: HistoryItem[] = result.playbackHistory || [];
 
-      fullHistoryListEl.innerHTML = ''; // Clear previous items
-
       if (history.length === 0) {
-        noFullHistoryMessageEl.style.display = 'block';
-        fullHistoryListEl.style.display = 'none';
+        noFullHistoryMessageEl.style.display = "block";
+        fullHistoryListEl.style.display = "none";
+        clearFullHistoryBtn.style.display = "none";
         return;
       }
 
-      noFullHistoryMessageEl.style.display = 'none';
-      fullHistoryListEl.style.display = 'block';
+      noFullHistoryMessageEl.style.display = "none";
+      fullHistoryListEl.style.display = "block";
+      clearFullHistoryBtn.style.display = "inline-block"; // Show clear button
+      fullHistoryListEl.innerHTML = ""; // Clear previous items
 
-      history.forEach(item => {
-        const li = document.createElement('li');
-        li.className = 'full-history-item';
-        li.dataset.audioUrl = item.audioUrl;
-        li.dataset.title = item.title;
-        if (item.bvid) {
-          li.dataset.bvid = item.bvid;
-        }
+      history.forEach((item) => {
+        const li = document.createElement("li");
+        li.className = "history-item-full"; // Use a different class if needed for styling
 
-        const titleSpan = document.createElement('span');
-        titleSpan.className = 'full-history-title';
+        const titleSpan = document.createElement("span");
+        titleSpan.className = "history-title";
         titleSpan.textContent = item.title;
         titleSpan.title = item.title; // Show full title on hover
+        // Add click listener to play the history item using the new method
+        titleSpan.addEventListener("click", async () => {
+          showStatus(`正在加载: ${item.title}`, 'info', 0);
+          const freshInfo = await fetchFreshVideoInfoFromBackground(item.bvid, item.cid);
+          if (freshInfo) {
+            openOrUpdatePlayerWindow(freshInfo);
+          } else {
+            showStatus(`无法加载 "${item.title}"。请检查视频是否有效或需要登录。`, "error");
+          }
+        });
 
-        const timestampSpan = document.createElement('span');
-        timestampSpan.className = 'full-history-timestamp';
-        timestampSpan.textContent = formatRelativeTime(item.timestamp);
+        const detailsSpan = document.createElement("span");
+        detailsSpan.className = "history-details";
+        const bvidText = item.bvid ? ` (BV: ${item.bvid})` : "";
+        detailsSpan.textContent = `${bvidText} - ${formatRelativeTime(item.timestamp)}`;
 
         li.appendChild(titleSpan);
-        li.appendChild(timestampSpan);
-
-        li.addEventListener('click', () => {
-          _playHistoryItem({
-            audioUrl: item.audioUrl,
-            title: item.title,
-            bvid: item.bvid || ''
-          });
-        });
+        li.appendChild(detailsSpan);
         fullHistoryListEl.appendChild(li);
       });
     } catch (error) {
-      console.error('Error displaying full playback history:', error);
-      noFullHistoryMessageEl.textContent = '无法加载播放历史记录。';
-      noFullHistoryMessageEl.style.display = 'block';
-      fullHistoryListEl.style.display = 'none';
+      console.error("Error displaying full playback history:", error);
+      noFullHistoryMessageEl.textContent = "无法加载播放历史记录。";
+      noFullHistoryMessageEl.style.display = "block";
+      fullHistoryListEl.style.display = "none";
+      clearFullHistoryBtn.style.display = "none";
     }
   }
-
-  // 新增清空历史功能
-  if (clearFullHistoryBtn) {
-    clearFullHistoryBtn.addEventListener('click', async () => {
-      if (confirm('确定要清空所有播放历史吗？此操作无法撤销。')) {
+  
+  clearFullHistoryBtn.addEventListener('click', async () => {
+    if (confirm("确定要清空所有播放历史记录吗？此操作不可恢复。")) {
         try {
-          await chrome.storage.local.remove('playbackHistory');
-          showStatus('播放历史已清空', 'success');
-          await displayFullPlaybackHistory(); // Refresh the list
+            await chrome.storage.local.remove('playbackHistory');
+            showStatus('播放历史已清空。', 'success');
+            displayFullPlaybackHistory(); // Refresh the view
         } catch (error) {
-          console.error('Error clearing playback history:', error);
-          showStatus('清空历史失败', 'error');
+            console.error('Error clearing full playback history:', error);
+            showStatus('清空播放历史失败。', 'error');
         }
-      }
-    });
-  }
+    }
+  });
 
+  // Initial call to display history
   displayFullPlaybackHistory();
 });

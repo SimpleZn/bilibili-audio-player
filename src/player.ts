@@ -4,8 +4,9 @@ import { Playlist, PlaylistItem } from './utils/playlistTypes'; // 1. Import Pla
 // Define the HistoryItem interface
 interface HistoryItem {
   title: string;
-  bvid?: string;
-  audioUrl: string;
+  bvid: string; // Bilibili Video ID (should be primary identifier)
+  cid: string;  // Bilibili Content ID
+  audioUrl?: string; // Optional: most recently fetched audio URL
   timestamp: string; // ISO string format for date/time
 }
 
@@ -55,8 +56,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // Interface for current track data
   interface CurrentTrackData {
     title: string;
-    audioUrl: string;
-    bvid?: string;
+    audioUrl: string; // This will be the fresh, temporary URL
+    bvid: string;
+    cid: string; // Added cid
+    aid?: string; // Optional, as bvid is primary
   }
   
   // Listen for messages from popup
@@ -64,17 +67,18 @@ document.addEventListener('DOMContentLoaded', () => {
     if (message.action === 'playPlaylist') {
       isPlaylistMode = true;
       const { playlist, startIndex } = message.data as { playlist: Playlist, startIndex: number };
-      currentPlaylist = playlist.items;
+      currentPlaylist = playlist.items; // These items should now have bvid/cid, audioUrl is optional
       currentPlaylistName = playlist.name;
       currentTrackIndex = startIndex || 0;
-      startOrContinuePlaylistPlayback();
+      startOrContinuePlaylistPlayback(); // This will now fetch fresh audioUrl
       updatePlaylistUI();
     } else if (message.action === 'playAudio' && message.data) {
       isPlaylistMode = false;
       currentPlaylist = null;
       currentPlaylistName = null;
       currentTrackIndex = -1;
-      videoData = message.data as CurrentTrackData; // Assign to the module-level videoData
+      // videoData is now expected to include bvid and cid from popup.ts
+      videoData = message.data as CurrentTrackData; 
       initializePlayer(videoData);
       updatePlaylistUI();
     }
@@ -85,30 +89,63 @@ document.addEventListener('DOMContentLoaded', () => {
   const audioUrlParam = urlParams.get('audioUrl');
   const titleParam = urlParams.get('title');
   const bvidParam = urlParams.get('bvid');
+  const cidParam = urlParams.get('cid'); // Added cidParam
   
-  if (audioUrlParam && titleParam) {
+  if (audioUrlParam && titleParam && bvidParam && cidParam) { // Ensure bvid and cid are present
     isPlaylistMode = false; // Ensure playlist mode is off
     videoData = {
       audioUrl: decodeURIComponent(audioUrlParam),
       title: decodeURIComponent(titleParam),
-      bvid: bvidParam || ''
+      bvid: bvidParam, // bvid is now required
+      cid: cidParam,   // cid is now required
+      // aid can be omitted if bvid is present or fetched if necessary
     };
     initializePlayer(videoData);
     updatePlaylistUI(); // Hide playlist UI elements
   }
   
   // Function to start or continue playlist playback
-  function startOrContinuePlaylistPlayback() {
+  async function startOrContinuePlaylistPlayback() {
     if (isPlaylistMode && currentPlaylist && currentTrackIndex >= 0 && currentTrackIndex < currentPlaylist.length) {
-      const trackItem = currentPlaylist[currentTrackIndex];
-      // Map PlaylistItem to CurrentTrackData structure
-      const trackData: CurrentTrackData = { 
-        title: trackItem.title, 
-        audioUrl: trackItem.audioUrl, 
-        bvid: trackItem.bvid 
-      };
-      initializePlayer(trackData);
-      updatePlaylistUI(); // Update track indicator
+      const trackItem = currentPlaylist[currentTrackIndex]; // This is a PlaylistItem
+      
+      // Fetch fresh audio URL using bvid and cid from trackItem
+      showPlayerMessage(`正在加载: ${trackItem.title}`, 'info');
+      const authConfig = await loadAuthConfig(); // Make sure loadAuthConfig is available or imported
+      const freshVideoInfo = await getBilibiliAudio(
+        `https://www.bilibili.com/video/${trackItem.bvid}`, // Construct URL from bvid
+        authConfig,
+        trackItem.cid // Pass cid directly if getBilibiliAudio can take it, or modify getBilibiliAudio
+                      // For now, assuming getBilibiliAudio uses the URL to find video info including cid.
+                      // If getBilibiliAudio needs cid explicitly, its signature/logic needs update.
+                      // Let's assume for now it re-fetches CID if not passed or if URL is primary.
+      );
+
+      if (freshVideoInfo && freshVideoInfo.audioUrl) {
+        // Map PlaylistItem and fresh info to CurrentTrackData structure
+        const trackData: CurrentTrackData = { 
+          title: trackItem.title, 
+          audioUrl: freshVideoInfo.audioUrl, 
+          bvid: trackItem.bvid, 
+          cid: freshVideoInfo.cid, // Use fresh cid, should match trackItem.cid
+          aid: freshVideoInfo.aid
+        };
+        initializePlayer(trackData);
+        updatePlaylistUI(); // Update track indicator
+      } else {
+        showPlayerMessage(`无法加载 "${trackItem.title}"。请检查网络或视频状态。`, 'error');
+        // Optionally, skip to next track or stop playback
+        if (isPlaylistMode && currentPlaylist) { // Advance to next to avoid getting stuck
+            currentTrackIndex++;
+            if (currentTrackIndex < currentPlaylist.length) {
+                startOrContinuePlaylistPlayback();
+            } else {
+                isPlaylistMode = false;
+                showPlayerMessage('播放列表已结束。', 'info');
+                updatePlaylistUI();
+            }
+        }
+      }
     } else if (isPlaylistMode) {
       // Playlist ended or invalid state
       isPlaylistMode = false;
@@ -157,11 +194,12 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Update playback history in chrome.storage.local
-  async function updatePlaybackHistory(videoData: any) {
+  async function updatePlaybackHistory(videoData: CurrentTrackData) { // Changed type to CurrentTrackData
     const newHistoryItem: HistoryItem = {
       title: videoData.title,
-      bvid: videoData.bvid,
-      audioUrl: videoData.audioUrl,
+      bvid: videoData.bvid, // Now directly from CurrentTrackData, which should be valid
+      cid: videoData.cid,   // Now directly from CurrentTrackData
+      audioUrl: videoData.audioUrl, // Store the temporary fresh audio URL
       timestamp: new Date().toISOString(),
     };
 
@@ -383,8 +421,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const newPlaylistItem: PlaylistItem = {
               id: Date.now().toString(),
               title: currentVideoData.title,
-              bvid: currentVideoData.bvid,
-              audioUrl: currentVideoData.audioUrl,
+              bvid: currentVideoData.bvid, // currentVideoData is videoData (CurrentTrackData)
+              cid: currentVideoData.cid,   // Add cid
+              audioUrl: currentVideoData.audioUrl, // Store temporary fresh URL
               addedAt: new Date().toISOString(),
             };
 
@@ -604,4 +643,50 @@ document.addEventListener('DOMContentLoaded', () => {
     showModal(true); // true for isPlaylistMode (i.e. show list)
   }
   // --- End Custom Modal Functions ---
+
+  // Need to import getBilibiliAudio and loadAuthConfig from bilibiliApi.ts
+  // This will require changes if player.ts is compiled in a way that it can't directly import
+  // For extensions, often helper functions are sendMessage'd from background or content scripts
+  // or direct imports work if using a bundler like webpack that handles modules.
+  // Assuming direct imports work due to webpack.config.js presence:
+
+  async function loadAuthConfig(): Promise<AuthConfig> { // Definition from bilibiliApi.ts (simplified for player context if direct import fails)
+    return new Promise((resolve) => {
+      chrome.storage.sync.get('authConfig', (result) => {
+        resolve((result.authConfig as AuthConfig) || { SESSDATA: '' });
+      });
+    });
+  }
+  interface AuthConfig { SESSDATA: string; }
+
+  // Placeholder for getBilibiliAudio if direct import from bilibiliApi.ts is problematic
+  // Ideally, this would be a direct import: import { getBilibiliAudio } from './utils/bilibiliApi';
+  // For now, defining a compatible signature. Actual call might need to go via background script.
+  async function getBilibiliAudio(url: string, authConfig?: AuthConfig, cidToMatch?: string): Promise<BilibiliVideoInfo | null> {
+      // The call is now intentionally routed through the background script, so this warning is no longer needed.
+      // console.warn("getBilibiliAudio called from player.ts - ensure this is intended and works with your build setup. Consider using background script for API calls.");
+      
+      // Basic implementation detail assuming it might be moved to background later:
+      return new Promise((resolve) => {
+          chrome.runtime.sendMessage(
+              { action: "getBilibiliAudio", url: url, authConfig: authConfig, cid: cidToMatch }, 
+              (response) => {
+                  if (chrome.runtime.lastError) {
+                      console.error("Error calling getBilibiliAudio via background:", chrome.runtime.lastError.message);
+                      resolve(null);
+                  } else {
+                      resolve(response as BilibiliVideoInfo | null);
+                  }
+              }
+          );
+      });
+  }
+
+  interface BilibiliVideoInfo {
+    title: string;
+    aid: string;
+    cid: string;
+    bvid: string;
+    audioUrl: string;
+  }
 });

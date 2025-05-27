@@ -1,28 +1,11 @@
 // Settings page script
 import { Playlist, PlaylistItem } from "./utils/playlistTypes"; // 1. Import Playlist Types
 import { getBilibiliAudio as fetchBilibiliAudioUtil, loadAuthConfig } from "./utils/bilibiliApi"; // For direct call if needed, or for type info
-
-interface HistoryItem {
-  title: string;
-  bvid: string; // Bilibili Video ID (should be primary identifier)
-  cid: string;  // Bilibili Content ID
-  audioUrl?: string; // Optional: most recently fetched audio URL
-  timestamp: string;
-}
+import { HistoryItem, BilibiliVideoInfo } from "./utils/types"; // Import shared types
 
 // Define BilibiliVideoInfo interface (mirroring from other files, ideally shared)
-interface BilibiliVideoInfo {
-  title: string;
-  aid: string;
-  cid: string;
-  bvid: string;
-  audioUrl: string;
-}
 
 // Define AuthConfig interface (mirroring from other files, ideally shared)
-interface AuthConfig {
-  SESSDATA: string;
-}
 
 document.addEventListener("DOMContentLoaded", async () => {
   const sessdataInput = document.getElementById("sessdata") as HTMLInputElement;

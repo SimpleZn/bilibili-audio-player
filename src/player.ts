@@ -1,14 +1,7 @@
 // Player page script
 import { Playlist, PlaylistItem } from './utils/playlistTypes'; // 1. Import Playlist Types
+import { HistoryItem, BilibiliVideoInfo, AuthConfig } from "./utils/types"; // Import shared types
 
-// Define the HistoryItem interface
-interface HistoryItem {
-  title: string;
-  bvid: string; // Bilibili Video ID (should be primary identifier)
-  cid: string;  // Bilibili Content ID
-  audioUrl?: string; // Optional: most recently fetched audio URL
-  timestamp: string; // ISO string format for date/time
-}
 
 document.addEventListener('DOMContentLoaded', () => {
   const audioPlayer = document.getElementById('audio-player') as HTMLAudioElement;
@@ -58,9 +51,10 @@ document.addEventListener('DOMContentLoaded', () => {
     title: string;
     audioUrl: string; // This will be the fresh, temporary URL
     bvid: string;
-    cid: string; // Added cid
+    cid: string; 
     aid?: string; // Optional, as bvid is primary
-  }
+  } // CurrentTrackData is specific to player.ts, so it stays.
+  // It's often a subset or slightly different version of BilibiliVideoInfo for player's internal use.
   
   // Listen for messages from popup
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -657,12 +651,12 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     });
   }
-  interface AuthConfig { SESSDATA: string; }
+  // interface AuthConfig { SESSDATA: string; } // REMOVED
 
   // Placeholder for getBilibiliAudio if direct import from bilibiliApi.ts is problematic
   // Ideally, this would be a direct import: import { getBilibiliAudio } from './utils/bilibiliApi';
   // For now, defining a compatible signature. Actual call might need to go via background script.
-  async function getBilibiliAudio(url: string, authConfig?: AuthConfig, cidToMatch?: string): Promise<BilibiliVideoInfo | null> {
+  async function getBilibiliAudio(url: string, authConfig?: AuthConfig, cidToMatch?: string): Promise<BilibiliVideoInfo | null> { // Use imported AuthConfig and BilibiliVideoInfo
       // The call is now intentionally routed through the background script, so this warning is no longer needed.
       // console.warn("getBilibiliAudio called from player.ts - ensure this is intended and works with your build setup. Consider using background script for API calls.");
       
@@ -681,12 +675,5 @@ document.addEventListener('DOMContentLoaded', () => {
           );
       });
   }
-
-  interface BilibiliVideoInfo {
-    title: string;
-    aid: string;
-    cid: string;
-    bvid: string;
-    audioUrl: string;
-  }
+  // interface BilibiliVideoInfo { ... } // REMOVED
 });

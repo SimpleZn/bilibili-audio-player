@@ -27,7 +27,7 @@
       padding-bottom: 10px;
     }
     .form-group {
-      margin-bottom: 15px;
+      margin-bottom: 15px; /* Standardized, already 15px, confirmed */
     }
     label {
       display: block;
@@ -56,6 +56,28 @@
     }
     button:hover {
       background-color: #e45f8a;
+    }
+    button#play-current-btn, button#clear-history-btn { 
+        padding: 8px 12px;
+        font-size: 12px;
+        width: auto; 
+    }
+    /* button#clear-history-btn { 
+        width: 100%; 
+    } */ /* Removed to allow side-by-side buttons */
+    .secondary-btn { /* Added for new buttons */
+        background-color: #6c757d; 
+        color: white;
+        border: none;
+        padding: 8px 12px; 
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 12px; 
+        transition: background-color 0.3s;
+        width: auto; 
+    }
+    .secondary-btn:hover {
+        background-color: #5a6268;
     }
     button:disabled {
       background-color: #cccccc;
@@ -121,6 +143,57 @@
       margin-bottom: 5px;
       word-break: break-all;
     }
+
+    /* Add these styles to popup.html's <style> section */
+    .container-section {
+      margin-bottom: 20px; 
+    }
+    .container-section h2 {
+      font-size: 16px; 
+      color: #fb7299; 
+      border-bottom: 1px solid #eee; 
+      padding-bottom: 8px; 
+      margin-bottom: 10px; 
+    }
+    #collection-list {
+      list-style-type: none;
+      padding-left: 0;
+      max-height: 150px; 
+      overflow-y: auto;
+    }
+    .collection-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 5px; 
+      border-bottom: 1px solid #f0f0f0;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .collection-item:hover {
+      background-color: #f5f5f5;
+    }
+    .collection-item:last-child {
+      border-bottom: none;
+    }
+    .collection-title {
+      flex-grow: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-right: 10px;
+    }
+    .collection-timestamp {
+      font-size: 11px;
+      color: #888;
+      white-space: nowrap;
+    }
+    .no-collections { 
+        text-align: center;
+        color: #666;
+        font-size: 13px;
+        padding: 10px 0;
+    }
   </style>
 </head>
 <body>
@@ -139,6 +212,24 @@
     
     <button id="extract-btn">提取并播放音频</button>
     <div id="status" class="status"></div>
+
+    <div id="collections-section" class="container-section">
+      <h2>播放合集</h2>
+      <ul id="collection-list">
+        <!-- Collection items will be populated here -->
+      </ul>
+    </div>
+
+    <div id="history-section" class="container-section">
+      <h2>播放历史</h2>
+      <ul id="history-list">
+        <!-- History items will be populated here -->
+      </ul>
+      <div class="history-footer" style="margin-top: 10px; display: flex; justify-content: space-between; align-items: center;">
+        <button id="more-history-btn" class="secondary-btn" style="display: none; font-size: 12px; padding: 6px 10px;">查看更多</button>
+        <button id="clear-history-btn" class="secondary-btn" style="font-size: 12px; padding: 6px 10px;">清空历史</button>
+    </div>
+    </div>
     
     <div class="footer">
       <a href="settings.html" target="_blank">设置</a> | 

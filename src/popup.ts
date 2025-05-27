@@ -146,25 +146,78 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // Function to open player window
-  function openPlayerWindow(videoData: any) {
-    // Create a new window for the player
+  async function openPlayerWindow(videoData: any) {
+    const playerUrl = chrome.runtime.getURL("player.html");
+    let existingPlayerWindow: chrome.windows.Window | undefined = undefined;
+    let playerTabId: number | undefined = undefined;
+
+    try {
+      const windows = await chrome.windows.getAll({ populate: true, windowTypes: ["popup", "normal"] });
+      for (const win of windows) {
+        if (win.tabs) {
+          const playerTab = win.tabs.find(tab => tab.url === playerUrl);
+          if (playerTab && win.id) {
+            existingPlayerWindow = win;
+            playerTabId = playerTab.id;
+            break;
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Error searching for existing player window:", error);
+      // Proceed to create a new window if search fails
+    }
+
+    if (existingPlayerWindow && playerTabId) {
+      try {
+        await chrome.windows.update(existingPlayerWindow.id!, { focused: true });
+        await chrome.tabs.sendMessage(playerTabId, {
+          action: "playAudio",
+          data: videoData,
+        });
+        // Store/update the window ID
+        await chrome.storage.local.set({ activePlayerWindowId: existingPlayerWindow.id });
+        // console.log("Reused existing player window:", existingPlayerWindow.id);
+      } catch (error) {
+        console.error("Error reusing existing player window:", error);
+        // If there's an error (e.g., window was closed), clear the stored ID and create a new one.
+        await chrome.storage.local.remove("activePlayerWindowId");
+        createNewPlayerWindow(videoData, playerUrl);
+      }
+    } else {
+      createNewPlayerWindow(videoData, playerUrl);
+    }
+  }
+
+  // Helper function to create a new player window
+  function createNewPlayerWindow(videoData: any, playerUrl: string) {
     chrome.windows.create(
       {
-        url: chrome.runtime.getURL("player.html"),
+        url: playerUrl,
         type: "popup",
         width: 400,
         height: 600,
       },
-      (window) => {
-        // Send video data to the player window
+      async (window) => {
         if (window && window.tabs && window.tabs[0] && window.tabs[0].id) {
+          const tabId = window.tabs[0].id;
+          // Store the new window ID
+          await chrome.storage.local.set({ activePlayerWindowId: window.id });
+          // console.log("Created new player window:", window.id);
+
           // Wait for the player window to load
           setTimeout(() => {
-            chrome.tabs.sendMessage(window.tabs?.[0]?.id || 0, {
-              action: "playAudio",
-              data: videoData,
-            });
-          }, 500);
+            chrome.tabs.sendMessage(
+              tabId,
+              {
+                action: "playAudio",
+                data: videoData,
+              }
+            );
+          }, 500); // Keep timeout for new window script loading
+        } else {
+          console.error("Could not get tab ID for the new player window.");
+          showStatus("Failed to open player window.", "error");
         }
       }
     );
@@ -346,45 +399,86 @@ document.addEventListener("DOMContentLoaded", async () => {
   displayPlaybackHistory();
   displayCollections(); // Added
 
-  function openPlayerWindowForPlaylist(
+  async function openPlayerWindowForPlaylist(
     playlist: Playlist,
     startIndex: number = 0
   ) {
+    const playerUrl = chrome.runtime.getURL("player.html");
+    let existingPlayerWindow: chrome.windows.Window | undefined = undefined;
+    let playerTabId: number | undefined = undefined;
+
+    try {
+      const windows = await chrome.windows.getAll({ populate: true, windowTypes: ["popup", "normal"] });
+      for (const win of windows) {
+        if (win.tabs) {
+          const playerTab = win.tabs.find(tab => tab.url === playerUrl);
+          if (playerTab && win.id) {
+            existingPlayerWindow = win;
+            playerTabId = playerTab.id;
+            break;
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Error searching for existing player window for playlist:", error);
+    }
+
+    const messagePayload = {
+      action: "playPlaylist",
+      data: {
+        playlist: playlist,
+        startIndex: startIndex,
+      },
+    };
+
+    if (existingPlayerWindow && playerTabId) {
+      try {
+        await chrome.windows.update(existingPlayerWindow.id!, { focused: true });
+        await chrome.tabs.sendMessage(playerTabId, messagePayload);
+        await chrome.storage.local.set({ activePlayerWindowId: existingPlayerWindow.id });
+        // console.log("Reused existing player window for playlist:", existingPlayerWindow.id);
+      } catch (error) {
+        console.error("Error reusing existing player window for playlist:", error);
+        await chrome.storage.local.remove("activePlayerWindowId");
+        createNewPlayerWindowForPlaylist(playlist, startIndex, playerUrl, messagePayload);
+      }
+    } else {
+      createNewPlayerWindowForPlaylist(playlist, startIndex, playerUrl, messagePayload);
+    }
+  }
+
+  function createNewPlayerWindowForPlaylist(
+    playlist: Playlist,
+    startIndex: number,
+    playerUrl: string,
+    messagePayload: any // Re-pass payload to avoid reconstruction
+  ) {
     chrome.windows.create(
       {
-        url: chrome.runtime.getURL("player.html"),
+        url: playerUrl, // Use the passed playerUrl
         type: "popup",
-        width: 420, // Slightly wider for potential playlist UI elements in player
-        height: 620, // Slightly taller
+        width: 420,
+        height: 620,
       },
-      (window) => {
+      async (window) => {
         if (window && window.tabs && window.tabs[0] && window.tabs[0].id) {
           const tabId = window.tabs[0].id;
-          // Wait for the player window to load its scripts
+          await chrome.storage.local.set({ activePlayerWindowId: window.id });
+          // console.log("Created new player window for playlist:", window.id);
+
           setTimeout(() => {
-            chrome.tabs.sendMessage(
-              tabId,
-              {
-                action: "playPlaylist",
-                data: {
-                  playlist: playlist,
-                  startIndex: startIndex,
-                },
-              },
-              () => {
-                if (chrome.runtime.lastError) {
-                  console.error(
-                    "Error sending playPlaylist message:",
-                    chrome.runtime.lastError.message
-                  );
-                  // Optional: showStatus('Player communication error.', 'error');
-                }
+            chrome.tabs.sendMessage(tabId, messagePayload, () => {
+              if (chrome.runtime.lastError) {
+                console.error(
+                  "Error sending playPlaylist message to new window:",
+                  chrome.runtime.lastError.message
+                );
               }
-            );
+            });
           }, 500);
         } else {
-          console.error("Could not get tab ID for the new player window.");
-          // Optional: showStatus("Failed to open player window.", "error");
+          console.error("Could not get tab ID for the new player window for playlist.");
+          // Optional: showStatus("Failed to open player window for playlist.", "error");
         }
       }
     );

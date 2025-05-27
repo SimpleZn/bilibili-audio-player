@@ -36,6 +36,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const prevTrackBtn = document.getElementById('prev-track-btn') as HTMLButtonElement;
   const nextTrackBtn = document.getElementById('next-track-btn') as HTMLButtonElement;
 
+  // Modal DOM elements
+  const customModalOverlay = document.getElementById('custom-modal-overlay') as HTMLDivElement;
+  const modalTitle = document.getElementById('modal-title') as HTMLHeadingElement;
+  const modalMessageText = document.getElementById('modal-message-text') as HTMLParagraphElement;
+  const modalPlaylistList = document.getElementById('modal-playlist-list') as HTMLUListElement;
+  const modalConfirmBtn = document.getElementById('modal-confirm-btn') as HTMLButtonElement;
+  const modalCancelBtn = document.getElementById('modal-cancel-btn') as HTMLButtonElement;
+
   let videoData: CurrentTrackData | null = null; // Updated type
   
   // State variables for playlist
@@ -305,90 +313,94 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (isCurrentlyFavorited) {
         // --- Unfavorite Logic: Remove from all playlists ---
-        if (confirm("确定要从所有播放合集中移除此歌曲吗？此操作会将其从所有包含它的合集中移除。")) {
-          try {
-            const playlistsData = await chrome.storage.local.get('userPlaylists');
-            let playlists: Playlist[] = playlistsData.userPlaylists || [];
-            let modified = false;
+        showConfirmationModal(
+          "确定要从所有播放合集中移除此歌曲吗？此操作会将其从所有包含它的合集中移除。",
+          async () => { // onConfirm
+            try {
+              const playlistsData = await chrome.storage.local.get('userPlaylists');
+              let playlists: Playlist[] = playlistsData.userPlaylists || [];
+              let modified = false;
 
-            playlists.forEach(playlist => {
-              const initialLength = playlist.items.length;
-              playlist.items = playlist.items.filter(item => 
-                !( (currentVideoData.bvid && item.bvid === currentVideoData.bvid) || 
-                   (!currentVideoData.bvid && item.audioUrl === currentVideoData.audioUrl) )
-              );
-              if (playlist.items.length < initialLength) {
-                playlist.updatedAt = new Date().toISOString();
-                modified = true;
+              playlists.forEach(playlist => {
+                const initialLength = playlist.items.length;
+                playlist.items = playlist.items.filter(item =>
+                  !((currentVideoData.bvid && item.bvid === currentVideoData.bvid) ||
+                    (!currentVideoData.bvid && item.audioUrl === currentVideoData.audioUrl))
+                );
+                if (playlist.items.length < initialLength) {
+                  playlist.updatedAt = new Date().toISOString();
+                  modified = true;
+                }
+              });
+
+              if (modified) {
+                await chrome.storage.local.set({ userPlaylists: playlists });
+                showPlayerMessage('已从所有播放合集中移除。', 'success');
+              } else {
+                showPlayerMessage('歌曲未在任何播放合集中找到。', 'info');
               }
-            });
-
-            if (modified) {
-              await chrome.storage.local.set({ userPlaylists: playlists });
-              showPlayerMessage('已从所有播放合集中移除。', 'success');
-            } else {
-              showPlayerMessage('歌曲未在任何播放合集中找到。', 'info'); // Should ideally not happen if icon was solid
+              updateFavoriteIcon(false);
+            } catch (error) {
+              console.error('Error removing from playlists:', error);
+              showPlayerMessage('从播放合集中移除失败。', 'error');
             }
-            updateFavoriteIcon(false);
-          } catch (error) {
-            console.error('Error removing from playlists:', error);
-            showPlayerMessage('从播放合集中移除失败。', 'error');
           }
-        }
+        );
       } else {
-        // --- Favorite Logic: Add to a selected playlist (existing logic) ---
+        // --- Favorite Logic: Add to a selected playlist ---
         try {
           const playlistsData = await chrome.storage.local.get('userPlaylists');
           const playlists: Playlist[] = playlistsData.userPlaylists || [];
 
           if (playlists.length === 0) {
             showPlayerMessage('请先在设置页面创建播放合集。', 'error');
+            // Optionally, direct them to settings or show a confirm to open settings
+            showConfirmationModal(
+              "您还没有创建任何播放合集。是否现在前往设置页面创建？",
+              () => { chrome.runtime.openOptionsPage(); },
+              () => {}, // Optional: do something on cancel
+              "提示",
+              "前往设置",
+              "稍后"
+            );
             return;
           }
 
-          let promptMessage = "请选择要添加到的播放合集 (输入数字):\n";
-          playlists.forEach((p, index) => {
-            promptMessage += `${index + 1}. ${p.name}\n`;
+          showPlaylistSelectionModal(playlists, async (selectedPlaylist) => {
+            if (!selectedPlaylist) return; // User cancelled or no selection
+
+            const isDuplicate = selectedPlaylist.items.some((item: PlaylistItem) =>
+              (currentVideoData.bvid && item.bvid === currentVideoData.bvid) ||
+              (!currentVideoData.bvid && item.audioUrl === currentVideoData.audioUrl)
+            );
+
+            if (isDuplicate) {
+              showPlayerMessage(`"${currentVideoData.title}" 已存在于播放合集 "${selectedPlaylist.name}"。`, 'error');
+              updateFavoriteIcon(true); // Ensure icon reflects favorited status
+              return;
+            }
+
+            const newPlaylistItem: PlaylistItem = {
+              id: Date.now().toString(),
+              title: currentVideoData.title,
+              bvid: currentVideoData.bvid,
+              audioUrl: currentVideoData.audioUrl,
+              addedAt: new Date().toISOString(),
+            };
+
+            selectedPlaylist.items.push(newPlaylistItem);
+            selectedPlaylist.updatedAt = new Date().toISOString();
+
+            // Update the specific playlist in the overall playlists array
+            const playlistIndex = playlists.findIndex(p => p.id === selectedPlaylist.id);
+            if (playlistIndex > -1) {
+              playlists[playlistIndex] = selectedPlaylist;
+            }
+
+            await chrome.storage.local.set({ userPlaylists: playlists });
+            showPlayerMessage(`已添加到播放合集 "${selectedPlaylist.name}"`, 'success');
+            updateFavoriteIcon(true);
           });
-
-          const choiceStr = prompt(promptMessage);
-          if (choiceStr === null) return; // User cancelled
-
-          const choiceNum = parseInt(choiceStr, 10);
-          if (isNaN(choiceNum) || choiceNum < 1 || choiceNum > playlists.length) {
-            showPlayerMessage('无效的选择。', 'error');
-            return;
-          }
-
-          const selectedPlaylist = playlists[choiceNum - 1];
-
-          const isDuplicate = selectedPlaylist.items.some((item: PlaylistItem) => 
-            (currentVideoData.bvid && item.bvid === currentVideoData.bvid) ||
-            (!currentVideoData.bvid && item.audioUrl === currentVideoData.audioUrl)
-          );
-
-          if (isDuplicate) {
-            // If it's a duplicate in the *selected* playlist, still ensure the icon is filled
-            // because it implies it's favorited (even if the user tried to add to same playlist again).
-            showPlayerMessage(`"${currentVideoData.title}" 已存在于播放合集 "${selectedPlaylist.name}"。`, 'error');
-            updateFavoriteIcon(true); // Ensure icon reflects favorited status
-            return;
-          }
-
-          const newPlaylistItem: PlaylistItem = {
-            id: Date.now().toString(),
-            title: currentVideoData.title,
-            bvid: currentVideoData.bvid,
-            audioUrl: currentVideoData.audioUrl,
-            addedAt: new Date().toISOString(),
-          };
-
-          selectedPlaylist.items.push(newPlaylistItem);
-          selectedPlaylist.updatedAt = new Date().toISOString();
-
-          await chrome.storage.local.set({ userPlaylists: playlists });
-          showPlayerMessage(`已添加到播放合集 "${selectedPlaylist.name}"`, 'success');
-          updateFavoriteIcon(true); // Update icon to filled star
 
         } catch (error) {
           console.error('Error adding to playlist:', error);
@@ -478,4 +490,118 @@ document.addEventListener('DOMContentLoaded', () => {
       nextTrackBtn.style.display = 'none';
     }
   }
+
+  // --- Custom Modal Functions ---
+  let currentConfirmCallback: (() => void) | null = null;
+  let currentCancelCallback: (() => void) | null = null;
+  let currentPlaylistSelectionCallback: ((playlist: Playlist | null) => void) | null = null;
+  let selectedPlaylistForModal: Playlist | null = null;
+
+  function showModal(isPlaylistMode: boolean) {
+    modalMessageText.style.display = isPlaylistMode ? 'none' : 'block';
+    modalPlaylistList.style.display = isPlaylistMode ? 'block' : 'none';
+    customModalOverlay.style.display = 'flex';
+  }
+
+  function hideModal() {
+    customModalOverlay.style.display = 'none';
+    modalPlaylistList.innerHTML = ''; // Clear list items
+    modalMessageText.textContent = '';
+    // Event listeners for confirm/cancel are persistent, so they don't need to be removed here.
+    // Only callbacks need to be cleared.
+    // modalConfirmBtn.removeEventListener('click', handleConfirmClick);
+    // modalCancelBtn.removeEventListener('click', handleCancelClick);
+
+    // Clear callbacks
+    currentConfirmCallback = null;
+    currentCancelCallback = null;
+    currentPlaylistSelectionCallback = null;
+    selectedPlaylistForModal = null;
+  }
+
+  function handleConfirmClick() {
+    if (currentPlaylistSelectionCallback) {
+      currentPlaylistSelectionCallback(selectedPlaylistForModal);
+    } else if (currentConfirmCallback) {
+      currentConfirmCallback();
+    }
+    hideModal();
+  }
+
+  function handleCancelClick() {
+    if (currentPlaylistSelectionCallback) {
+      currentPlaylistSelectionCallback(null); // Pass null for cancellation
+    } else if (currentCancelCallback) {
+      currentCancelCallback();
+    }
+    hideModal();
+  }
+
+  modalConfirmBtn.addEventListener('click', handleConfirmClick);
+  modalCancelBtn.addEventListener('click', handleCancelClick);
+
+  // Function to show a confirmation dialog
+  function showConfirmationModal(
+    message: string,
+    onConfirm: () => void,
+    onCancel?: () => void,
+    title: string = "请确认",
+    confirmText: string = "确定",
+    cancelText: string = "取消"
+  ) {
+    modalTitle.textContent = title;
+    modalMessageText.textContent = message;
+    modalConfirmBtn.textContent = confirmText;
+    modalCancelBtn.textContent = cancelText;
+
+    currentConfirmCallback = onConfirm;
+    currentCancelCallback = onCancel || (() => {}); // Default to no-op if not provided
+    currentPlaylistSelectionCallback = null; // Not a playlist selection
+
+    showModal(false); // false for !isPlaylistMode (i.e. show message, not list)
+  }
+
+  // Function to show playlist selection dialog
+  function showPlaylistSelectionModal(
+    playlists: Playlist[],
+    onSelect: (playlist: Playlist | null) => void
+  ) {
+    modalTitle.textContent = "选择播放合集";
+    modalPlaylistList.innerHTML = ''; // Clear previous items
+    selectedPlaylistForModal = null; // Reset selection
+
+    if (playlists.length === 0) {
+      // This case should ideally be handled before calling, but as a fallback:
+      modalMessageText.textContent = "没有可用的播放合集。请先创建。";
+      modalPlaylistList.style.display = 'none';
+      modalConfirmBtn.style.display = 'none'; // No confirm if no playlists
+      modalCancelBtn.textContent = "关闭";
+    } else {
+      playlists.forEach(playlist => {
+        const li = document.createElement('li');
+        li.className = 'modal-list-item';
+        li.textContent = playlist.name;
+        li.dataset.playlistId = playlist.id;
+        li.addEventListener('click', () => {
+          // Remove 'selected' from previously selected item
+          const currentSelected = modalPlaylistList.querySelector('.selected');
+          if (currentSelected) currentSelected.classList.remove('selected');
+          // Add 'selected' to clicked item
+          li.classList.add('selected');
+          selectedPlaylistForModal = playlist;
+        });
+        modalPlaylistList.appendChild(li);
+      });
+      modalConfirmBtn.style.display = 'inline-block';
+      modalConfirmBtn.textContent = "确定";
+      modalCancelBtn.textContent = "取消";
+    }
+
+    currentPlaylistSelectionCallback = onSelect;
+    currentConfirmCallback = null;
+    currentCancelCallback = () => onSelect(null); // Ensure cancel calls onSelect(null)
+
+    showModal(true); // true for isPlaylistMode (i.e. show list)
+  }
+  // --- End Custom Modal Functions ---
 });

@@ -77,6 +77,61 @@
       color: #c62828;
       display: block;
     }
+
+    /* Styles for Playlist Management */
+    #playlist-management-container, #playlist-items-view {
+      margin-top: 20px;
+    }
+
+    #playlist-list-container ul {
+      list-style-type: none;
+      padding: 0;
+    }
+
+    #playlist-list-container li, #playlist-items-list li {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px;
+      border: 1px solid #eee;
+      border-radius: 4px;
+      margin-bottom: 8px;
+      background-color: #fff;
+    }
+    
+    #playlist-list-container li:hover, #playlist-items-list li:hover {
+        background-color: #f9f9f9;
+    }
+
+    .playlist-name, .item-title {
+      cursor: pointer;
+      font-weight: 500;
+      flex-grow: 1;
+    }
+
+    .playlist-name:hover, .item-title:hover {
+      color: #fb7299;
+    }
+    
+    .playlist-actions button, .item-actions button {
+      margin-left: 8px;
+      padding: 6px 12px;
+      font-size: 13px;
+    }
+
+    .secondary-btn {
+        background-color: #6c757d;
+    }
+    .secondary-btn:hover {
+        background-color: #5a6268;
+    }
+
+    .empty-message, .no-items-message {
+        color: #666;
+        text-align: center;
+        padding: 15px;
+    }
+    /* End of Playlist Management Styles */
   </style>
 </head>
 <body>
@@ -100,6 +155,27 @@
     
     <button id="save-btn">保存设置</button>
     <div id="status" class="status"></div>
+  </div>
+
+  <div class="container" id="playlist-management-container">
+    <h2>播放合集管理</h2>
+    <div class="form-group">
+      <label for="new-playlist-name">新的播放合集名称</label>
+      <input type="text" id="new-playlist-name" placeholder="例如：我的收藏">
+    </div>
+    <button id="create-playlist-btn">创建播放合集</button>
+
+    <div id="playlist-list-container">
+      <!-- Playlists will be rendered here by settings.js -->
+    </div>
+  </div>
+
+  <div class="container" id="playlist-items-view" style="display: none;">
+    <h2 id="playlist-items-title">播放合集歌曲</h2>
+    <button id="back-to-playlists-btn" class="secondary-btn">返回播放合集列表</button>
+    <ul id="playlist-items-list">
+      <!-- Playlist items will be rendered here -->
+    </ul>
   </div>
 
   <script src="settings.js"></script>

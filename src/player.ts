@@ -1,5 +1,5 @@
 // Player page script
-import { Playlist, PlaylistItem } from '../utils/playlistTypes'; // 1. Import Playlist Types
+import { Playlist, PlaylistItem } from './utils/playlistTypes'; // 1. Import Playlist Types
 
 // Define the HistoryItem interface
 interface HistoryItem {
@@ -78,6 +78,10 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Update volume level display
     updateVolumeLevel(audioPlayer.volume);
+
+    // Check and set favorite icon state
+    const isFav = await checkIfVideoIsFavorited(videoData);
+    updateFavoriteIcon(isFav);
     
     // Auto play
     audioPlayer.play().catch(error => {
@@ -207,63 +211,103 @@ document.addEventListener('DOMContentLoaded', () => {
     // Add to Playlist button event listener (5)
     addToPlaylistBtn.addEventListener('click', async () => {
       if (!currentVideoData || !currentVideoData.audioUrl) {
-        showPlayerMessage('当前无视频信息可添加。', 'error');
+        showPlayerMessage('当前无视频信息可添加或移除。', 'error');
         return;
       }
 
-      try {
-        const playlistsData = await chrome.storage.local.get('userPlaylists');
-        const playlists: Playlist[] = playlistsData.userPlaylists || [];
+      const isCurrentlyFavorited = addToPlaylistBtn.classList.contains('is-favorited');
 
-        if (playlists.length === 0) {
-          showPlayerMessage('请先在设置页面创建播放合集。', 'error');
-          return;
+      if (isCurrentlyFavorited) {
+        // --- Unfavorite Logic: Remove from all playlists ---
+        if (confirm("确定要从所有播放合集中移除此歌曲吗？此操作会将其从所有包含它的合集中移除。")) {
+          try {
+            const playlistsData = await chrome.storage.local.get('userPlaylists');
+            let playlists: Playlist[] = playlistsData.userPlaylists || [];
+            let modified = false;
+
+            playlists.forEach(playlist => {
+              const initialLength = playlist.items.length;
+              playlist.items = playlist.items.filter(item => 
+                !( (currentVideoData.bvid && item.bvid === currentVideoData.bvid) || 
+                   (!currentVideoData.bvid && item.audioUrl === currentVideoData.audioUrl) )
+              );
+              if (playlist.items.length < initialLength) {
+                playlist.updatedAt = new Date().toISOString();
+                modified = true;
+              }
+            });
+
+            if (modified) {
+              await chrome.storage.local.set({ userPlaylists: playlists });
+              showPlayerMessage('已从所有播放合集中移除。', 'success');
+            } else {
+              showPlayerMessage('歌曲未在任何播放合集中找到。', 'info'); // Should ideally not happen if icon was solid
+            }
+            updateFavoriteIcon(false);
+          } catch (error) {
+            console.error('Error removing from playlists:', error);
+            showPlayerMessage('从播放合集中移除失败。', 'error');
+          }
         }
+      } else {
+        // --- Favorite Logic: Add to a selected playlist (existing logic) ---
+        try {
+          const playlistsData = await chrome.storage.local.get('userPlaylists');
+          const playlists: Playlist[] = playlistsData.userPlaylists || [];
 
-        let promptMessage = "请选择要添加到的播放合集 (输入数字):\n";
-        playlists.forEach((p, index) => {
-          promptMessage += `${index + 1}. ${p.name}\n`;
-        });
+          if (playlists.length === 0) {
+            showPlayerMessage('请先在设置页面创建播放合集。', 'error');
+            return;
+          }
 
-        const choiceStr = prompt(promptMessage);
-        if (choiceStr === null) return; // User cancelled
+          let promptMessage = "请选择要添加到的播放合集 (输入数字):\n";
+          playlists.forEach((p, index) => {
+            promptMessage += `${index + 1}. ${p.name}\n`;
+          });
 
-        const choiceNum = parseInt(choiceStr, 10);
-        if (isNaN(choiceNum) || choiceNum < 1 || choiceNum > playlists.length) {
-          showPlayerMessage('无效的选择。', 'error');
-          return;
+          const choiceStr = prompt(promptMessage);
+          if (choiceStr === null) return; // User cancelled
+
+          const choiceNum = parseInt(choiceStr, 10);
+          if (isNaN(choiceNum) || choiceNum < 1 || choiceNum > playlists.length) {
+            showPlayerMessage('无效的选择。', 'error');
+            return;
+          }
+
+          const selectedPlaylist = playlists[choiceNum - 1];
+
+          const isDuplicate = selectedPlaylist.items.some((item: PlaylistItem) => 
+            (currentVideoData.bvid && item.bvid === currentVideoData.bvid) ||
+            (!currentVideoData.bvid && item.audioUrl === currentVideoData.audioUrl)
+          );
+
+          if (isDuplicate) {
+            // If it's a duplicate in the *selected* playlist, still ensure the icon is filled
+            // because it implies it's favorited (even if the user tried to add to same playlist again).
+            showPlayerMessage(`"${currentVideoData.title}" 已存在于播放合集 "${selectedPlaylist.name}"。`, 'error');
+            updateFavoriteIcon(true); // Ensure icon reflects favorited status
+            return;
+          }
+
+          const newPlaylistItem: PlaylistItem = {
+            id: Date.now().toString(),
+            title: currentVideoData.title,
+            bvid: currentVideoData.bvid,
+            audioUrl: currentVideoData.audioUrl,
+            addedAt: new Date().toISOString(),
+          };
+
+          selectedPlaylist.items.push(newPlaylistItem);
+          selectedPlaylist.updatedAt = new Date().toISOString();
+
+          await chrome.storage.local.set({ userPlaylists: playlists });
+          showPlayerMessage(`已添加到播放合集 "${selectedPlaylist.name}"`, 'success');
+          updateFavoriteIcon(true); // Update icon to filled star
+
+        } catch (error) {
+          console.error('Error adding to playlist:', error);
+          showPlayerMessage('添加到播放合集失败。', 'error');
         }
-
-        const selectedPlaylist = playlists[choiceNum - 1];
-
-        // Duplicate check within selected playlist
-        const isDuplicate = selectedPlaylist.items.some(item => 
-          (currentVideoData.bvid && item.bvid === currentVideoData.bvid) ||
-          (!currentVideoData.bvid && item.audioUrl === currentVideoData.audioUrl)
-        );
-
-        if (isDuplicate) {
-          showPlayerMessage(`"${currentVideoData.title}" 已存在于播放合集 "${selectedPlaylist.name}"。`, 'error');
-          return;
-        }
-
-        const newPlaylistItem: PlaylistItem = {
-          id: Date.now().toString(),
-          title: currentVideoData.title,
-          bvid: currentVideoData.bvid,
-          audioUrl: currentVideoData.audioUrl,
-          addedAt: new Date().toISOString(),
-        };
-
-        selectedPlaylist.items.push(newPlaylistItem);
-        selectedPlaylist.updatedAt = new Date().toISOString();
-
-        await chrome.storage.local.set({ userPlaylists: playlists });
-        showPlayerMessage(`已添加到播放合集 "${selectedPlaylist.name}"`, 'success');
-
-      } catch (error) {
-        console.error('Error adding to playlist:', error);
-        showPlayerMessage('添加到播放合集失败。', 'error');
       }
     });
   }
@@ -283,7 +327,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   
   // Show player status message (4. Replaces showError)
-  function showPlayerMessage(message: string, type: 'success' | 'error') {
+  function showPlayerMessage(message: string, type: 'success' | 'error' | 'info') {
     if (!statusMessage) return;
     statusMessage.textContent = message;
     statusMessage.className = `status-message ${type}`; // Uses new class names from HTML
@@ -296,4 +340,41 @@ document.addEventListener('DOMContentLoaded', () => {
       statusMessage.className = 'status-message';
     }, 3000);
   }
+
+  // --- Favorite Icon Logic ---
+  function updateFavoriteIcon(isFavorited: boolean) {
+    if (addToPlaylistBtn) {
+      if (isFavorited) {
+        addToPlaylistBtn.classList.add('is-favorited');
+        addToPlaylistBtn.title = "已在播放合集中";
+      } else {
+        addToPlaylistBtn.classList.remove('is-favorited');
+        addToPlaylistBtn.title = "添加到播放合集";
+      }
+    }
+  }
+
+  async function checkIfVideoIsFavorited(currentVideoData: any): Promise<boolean> {
+    if (!currentVideoData || (!currentVideoData.bvid && !currentVideoData.audioUrl)) {
+      return false;
+    }
+    try {
+      const playlistsData = await chrome.storage.local.get('userPlaylists');
+      const playlists: Playlist[] = playlistsData.userPlaylists || [];
+
+      for (const playlist of playlists) {
+        const isPresent = playlist.items.some((item: PlaylistItem) => 
+          (currentVideoData.bvid && item.bvid === currentVideoData.bvid) ||
+          (!currentVideoData.bvid && item.audioUrl === currentVideoData.audioUrl)
+        );
+        if (isPresent) {
+          return true; // Found in at least one playlist
+        }
+      }
+    } catch (error) {
+      console.error('Error checking favorite status:', error);
+    }
+    return false; // Not found in any playlist
+  }
+  // --- End Favorite Icon Logic ---
 });

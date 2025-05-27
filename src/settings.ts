@@ -1,5 +1,5 @@
 // Settings page script
-import { Playlist, PlaylistItem } from '../utils/playlistTypes'; // 1. Import Playlist Types
+import { Playlist, PlaylistItem } from './utils/playlistTypes'; // 1. Import Playlist Types
 
 document.addEventListener('DOMContentLoaded', async () => {
   const sessdataInput = document.getElementById('sessdata') as HTMLInputElement;
@@ -10,7 +10,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const newPlaylistNameInput = document.getElementById('new-playlist-name') as HTMLInputElement;
   const createPlaylistBtn = document.getElementById('create-playlist-btn') as HTMLButtonElement;
   const playlistListContainer = document.getElementById('playlist-list-container') as HTMLDivElement;
-  const playlistManagementSection = playlistListContainer.parentElement as HTMLDivElement; // Assuming .section-container
+  const playlistManagementSection = playlistListContainer ? playlistListContainer.parentElement as HTMLDivElement : null; // Assuming .section-container
 
   // Playlist Items View DOM Elements (1)
   const playlistItemsView = document.getElementById('playlist-items-view') as HTMLDivElement;
@@ -268,7 +268,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         noItemsMsg.textContent = '此播放合集暂无歌曲。';
         playlistItemsList.appendChild(noItemsMsg);
       } else {
-        playlist.items.forEach(item => {
+        playlist.items.forEach((item: PlaylistItem) => {
           const li = document.createElement('li');
           
           const itemInfoDiv = document.createElement('div');
@@ -347,7 +347,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
       
       const originalItemCount = playlists[playlistIndex].items.length;
-      playlists[playlistIndex].items = playlists[playlistIndex].items.filter(item => item.id !== itemId);
+      playlists[playlistIndex].items = playlists[playlistIndex].items.filter((item: PlaylistItem) => item.id !== itemId);
 
       if (playlists[playlistIndex].items.length < originalItemCount) {
         playlists[playlistIndex].updatedAt = new Date().toISOString();

@@ -219,15 +219,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
-        titleSpan.className = 'history-title';
-        titleSpan.textContent = item.title;
-        titleSpan.title = item.title; // Show full title on hover
-
-        const timestampSpan = document.createElement('span');
-      }
-    });
-  }
-
   // Event listener for "Clear History" button
   if (clearHistoryBtn) {
     clearHistoryBtn.addEventListener('click', async () => {

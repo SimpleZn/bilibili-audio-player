@@ -1,5 +1,6 @@
 // Content script for Bilibili pages
-import { getBilibiliAudio, isBilibiliVideoPage, loadAuthConfig } from './utils/bilibiliApi';
+import { getBilibiliAudio } from './utils/bilibiliApi';
+import { isBilibiliVideoPage, loadAuthConfig } from './utils/util';
 
 // Check if current page is a Bilibili video page
 if (isBilibiliVideoPage(window.location.href)) {

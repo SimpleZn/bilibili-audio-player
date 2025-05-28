@@ -1,6 +1,5 @@
-
-/* eslint-disable @typescript-eslint/naming-convention */
 import md5 from 'md5';
+import { AuthConfig } from './types';
 
 const mixinKeyEncTab = [
   46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49, 33, 9, 42, 19, 29, 28,
@@ -44,3 +43,69 @@ export function encWbi(params: Record<string, any>, imgKey: string, subKey: stri
   } as any as typeof params & typeof data;
   // return query + '&w_rid=' + wbiSign;
 }
+
+// Utility functions moved from bilibiliApi.ts
+
+/**
+ * Extract video ID (BV or AV) from Bilibili URL
+ * @param url Bilibili video URL
+ * @returns Video ID object containing aid, bvid, or null if not found
+ */
+export const extractVideoId = (url: string): { aid?: string; bvid?: string } | null => {
+  // Match BV ID pattern
+  const bvMatch = url.match(/\/video\/(BV[a-zA-Z0-9]+)/);
+  if (bvMatch && bvMatch[1]) {
+    return { bvid: bvMatch[1] };
+  }
+
+  // Match AV ID pattern
+  const avMatch = url.match(/\/video\/av(\d+)/);
+  if (avMatch && avMatch[1]) {
+    return { aid: avMatch[1] };
+  }
+
+  // Match short URL pattern
+  const shortMatch = url.match(/bilibili\.com\/([a-zA-Z0-9]+)/);
+  if (shortMatch && shortMatch[1] && !shortMatch[1].includes('/')) {
+    // Assuming it's a BV ID if it's not a path
+    if (shortMatch[1].startsWith('BV')) {
+      return { bvid: shortMatch[1] };
+    } else if (shortMatch[1].startsWith('av')) {
+      return { aid: shortMatch[1].substring(2) };
+    }
+  }
+
+  return null;
+};
+
+/**
+ * Check if current tab is a Bilibili video page
+ * @param url Current tab URL
+ * @returns Boolean indicating if URL is a Bilibili video page
+ */
+export const isBilibiliVideoPage = (url: string): boolean => {
+  return /bilibili\.com\/video\/(av\d+|BV[a-zA-Z0-9]+)/.test(url);
+};
+
+/**
+ * Save authentication configuration to Chrome storage
+ * @param authConfig Authentication configuration
+ * @returns Promise resolving when save is complete
+ */
+export const saveAuthConfig = async (authConfig: AuthConfig): Promise<void> => {
+  return new Promise((resolve) => {
+    chrome.storage.sync.set({ authConfig }, resolve);
+  });
+};
+
+/**
+ * Load authentication configuration from Chrome storage
+ * @returns Promise resolving to authentication configuration or empty object if not found
+ */
+export const loadAuthConfig = async (): Promise<AuthConfig> => {
+  return new Promise((resolve) => {
+    chrome.storage.sync.get('authConfig', (result) => {
+      resolve((result.authConfig as AuthConfig) || { SESSDATA: '' });
+    });
+  });
+};

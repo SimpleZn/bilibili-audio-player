@@ -1,7 +1,8 @@
 // Settings page script
 import { Playlist, PlaylistItem } from "./utils/playlistTypes"; // 1. Import Playlist Types
-import { getBilibiliAudio as fetchBilibiliAudioUtil, loadAuthConfig, extractVideoId } from "./utils/bilibiliApi"; // For direct call if needed, or for type info, added extractVideoId
-import { HistoryItem, BilibiliVideoInfo } from "./utils/types"; // Import shared types
+import { getBilibiliAudio as fetchBilibiliAudioUtil } from "./utils/bilibiliApi"; // For direct call if needed, or for type info, added extractVideoId
+import { loadAuthConfig, extractVideoId } from "./utils/util"; // Updated import path
+import { HistoryItem, BilibiliVideoInfo, AuthConfig } from "./utils/types"; // Import shared types, Added AuthConfig
 
 // Define BilibiliVideoInfo interface (mirroring from other files, ideally shared)
 
@@ -101,10 +102,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     
     try {
       await chrome.storage.sync.set({
-        authConfig: { SESSDATA }
+        authConfig: { SESSDATA } as AuthConfig // Explicitly type authConfig here
       });
       showStatus('SESSDATA 设置已保存！', 'success');
-    } catch (error) {
+    } catch (error: any) { // Explicitly type error
       console.error('Error saving SESSDATA settings:', error);
       showStatus('保存 SESSDATA 设置时出错，请重试。', 'error');
     }
@@ -116,7 +117,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   async function fetchFreshVideoInfoFromBackground(bvid: string, cidGiven?: string): Promise<BilibiliVideoInfo | null> {
     return new Promise((resolve) => {
       const videoUrl = `https://www.bilibili.com/video/${bvid}`;
-      loadAuthConfig().then(authConfig => {
+      loadAuthConfig().then((authConfig: AuthConfig) => { // Explicitly type authConfig
         chrome.runtime.sendMessage(
           { action: "getBilibiliAudio", url: videoUrl, authConfig: authConfig, cid: cidGiven }, 
           (response) => {
@@ -128,7 +129,7 @@ document.addEventListener("DOMContentLoaded", async () => {
             }
           }
         );
-      }).catch(error => {
+      }).catch((error: any) => { // Explicitly type error
         console.error("Error loading auth config for fetching video info:", error);
         resolve(null);
       });

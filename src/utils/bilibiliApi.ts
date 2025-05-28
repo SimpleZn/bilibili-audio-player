@@ -1,8 +1,62 @@
 /**
  * Bilibili API utilities for extracting audio URLs from video pages
  */
-import { BilibiliVideoInfo, AuthConfig, SignData } from './types'; // Import shared types
-import { encWbi } from './util';
+import {
+  BilibiliVideoInfo,
+  AuthConfig,
+  SignData,
+  ViewApiResponseData, // Imported from types.ts
+  PlayUrlApiResponseData, // Imported from types.ts
+  BiliApiResponse,      // Imported from types.ts
+} from './types'; 
+import { encWbi, extractVideoId } from './util'; // extractVideoId imported from util.ts
+
+const BILIBILI_API_BASE_URL = 'https://api.bilibili.com';
+
+// Interfaces like ViewApiResponseData, DashAudioStream, etc., have been moved to types.ts
+// Utility functions like extractVideoId, isBilibiliVideoPage, etc., have been moved to util.ts
+
+async function makeSignedBiliApiRequest<T>(
+  endpoint: string,
+  params: Record<string, string>,
+  authConfig?: AuthConfig
+): Promise<T> {
+  const { signData } = await initSignData(); 
+  if (!signData) {
+    throw new Error('Failed to get sign data for API request.');
+  }
+
+  const signedParamsObject = encWbi(params, signData.imgKey, signData.subKey);
+  const signedParamsUrlString = new URLSearchParams(signedParamsObject).toString();
+
+  const headers: HeadersInit = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'Referer': 'https://www.bilibili.com',
+  };
+
+  if (authConfig?.SESSDATA) {
+    headers.Cookie = `SESSDATA=${authConfig.SESSDATA}`;
+  }
+
+  const response = await fetch(`${BILIBILI_API_BASE_URL}${endpoint}?${signedParamsUrlString}`, {
+    method: 'GET',
+    headers,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Bilibili API HTTP error: ${response.status} ${response.statusText}`);
+  }
+
+  const data = (await response.json()) as BiliApiResponse<T>;
+
+  if (data.code !== 0) {
+    throw new Error(`Bilibili API error: ${data.code} - ${data.message || 'Unknown API error'}`);
+  }
+  if (!data.data) {
+    throw new Error('Bilibili API error: No data returned.');
+  }
+  return data.data;
+}
 
 function parseSignData(json: any): SignData {  
   const imgUrl = json.data.wbi_img.img_url;  
@@ -22,7 +76,7 @@ async function getSignData() {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
     'Referer': 'https://www.bilibili.com',
   };
-  const response = await fetch("https://api.bilibili.com/x/web-interface/nav", {  
+  const response = await fetch(`${BILIBILI_API_BASE_URL}/x/web-interface/nav`, { 
     method: 'GET',  
     headers
   });  
@@ -31,36 +85,16 @@ async function getSignData() {
     const data = await response.json();  
     return parseSignData(data);  
   } else {  
-    throw new Error(`获取签名秘钥失败: ${response.status}`);  
+    throw new Error(`获取签名秘钥失败: ${response.status}`);
   }  
 }  
-
-
-
-async function getCachedSignData() {  
-  const cachedData = await chrome.storage.local.get(['signData', 'cacheTime']);  
-  const now = Date.now();  
-    
-  // 检查缓存是否在1天内有效  
-  if (!cachedData.signData || !cachedData.cacheTime ||   
-      (now - cachedData.cacheTime) > 24 * 60 * 60 * 1000) {  
-    const newSignData = await getSignData();  
-    await chrome.storage.local.set({  
-      signData: newSignData,  
-      cacheTime: now  
-    });  
-    return newSignData;
-  } else {
-    return cachedData.signData;
-  }
-}
 
 async function getSpiData() {  
   const headers: HeadersInit = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
     'Referer': 'https://www.bilibili.com',
   };
-  const response = await fetch("https://api.bilibili.com/x/frontend/finger/spi", {  
+  const response = await fetch(`${BILIBILI_API_BASE_URL}/x/frontend/finger/spi`, { 
     method: 'GET',  
     headers
   });  
@@ -77,7 +111,6 @@ async function getSpiData() {
 }
 
 export async function initSignData() {  
-  // 检查缓存是否有效（1天内）  
   const cachedData = await chrome.storage.local.get([  
     'signData',   
     'cacheTime',  
@@ -87,7 +120,6 @@ export async function initSignData() {
   const now = Date.now();  
   const oneDayInMs = 24 * 60 * 60 * 1000;  
     
-  // 如果缓存存在且在1天内有效  
   if (cachedData.signData &&   
       cachedData.cacheTime &&   
       cachedData.spiData &&  
@@ -102,13 +134,11 @@ export async function initSignData() {
   console.log('缓存失效，重新获取签名数据');  
     
   try {  
-    // 并行获取签名数据和SPI数据  
     const [signData, spiData] = await Promise.all([  
       getSignData(),  
       getSpiData()  
     ]);  
       
-    // 保存到缓存  
     await chrome.storage.local.set({  
       signData: signData,  
       spiData: spiData,  
@@ -124,200 +154,103 @@ export async function initSignData() {
   }  
 }  
 
-  // 对参数进行签名
-  export  async function sign(params: Record<string, string>) {
-    const signData = await getCachedSignData();
-    if (signData) {
-      return encWbi(params, signData.imgKey, signData.subKey);
-    } else {
-      console.error('请先获取认证秘钥 signData');
-    }
+export async function sign(params: Record<string, string>) {
+  const { signData } = await initSignData(); 
+  if (signData) {
+    return encWbi(params, signData.imgKey, signData.subKey);
+  } else {
+    console.error('Failed to get signData for signing parameters.');
+    throw new Error('Authentication keys (signData) not available for signing.');
   }
+}
 
-/**
- * Extract video ID (BV or AV) from Bilibili URL
- * @param url Bilibili video URL
- * @returns Video ID object containing aid, bvid, or null if not found
- */
-export const extractVideoId = (url: string): { aid?: string; bvid?: string } | null => {
-  // Match BV ID pattern
-  const bvMatch = url.match(/\/video\/(BV[a-zA-Z0-9]+)/);
-  if (bvMatch && bvMatch[1]) {
-    return { bvid: bvMatch[1] };
-  }
-
-  // Match AV ID pattern
-  const avMatch = url.match(/\/video\/av(\d+)/);
-  if (avMatch && avMatch[1]) {
-    return { aid: avMatch[1] };
-  }
-
-  // Match short URL pattern
-  const shortMatch = url.match(/bilibili\.com\/([a-zA-Z0-9]+)/);
-  if (shortMatch && shortMatch[1] && !shortMatch[1].includes('/')) {
-    // Assuming it's a BV ID if it's not a path
-    if (shortMatch[1].startsWith('BV')) {
-      return { bvid: shortMatch[1] };
-    } else if (shortMatch[1].startsWith('av')) {
-      return { aid: shortMatch[1].substring(2) };
-    }
-  }
-
-  return null;
-};
-
-/**
- * Fetch video information including CID from Bilibili API
- * @param videoId Video ID object containing aid or bvid
- * @param authConfig Authentication configuration
- * @returns Promise resolving to video info or null if failed
- */
 export const fetchVideoInfo = async (
   videoId: { aid?: string; bvid?: string },
   authConfig?: AuthConfig
 ): Promise<{ title: string; cid: string; bvid: string; aid: string } | null> => {
   try {
-    const params = new URLSearchParams();
-    const signData = await getSignData();
+    const params: Record<string, string> = {};
     if (videoId.bvid) {
-      params.append('bvid', videoId.bvid);
+      params.bvid = videoId.bvid;
     } else if (videoId.aid) {
-      params.append('aid', videoId.aid);
+      params.aid = videoId.aid;
     } else {
-      throw new Error('Invalid video ID');
+      console.error('Invalid video ID provided to fetchVideoInfo');
+      return null; 
     }
 
-    const headers: HeadersInit = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    const data = await makeSignedBiliApiRequest<ViewApiResponseData>(
+      '/x/web-interface/view',
+      params,
+      authConfig
+    );
+
+    return {
+      title: data.title,
+      cid: data.cid,
+      bvid: data.bvid,
+      aid: data.aid,
     };
-
-    // Add SESSDATA cookie if provided
-    if (authConfig?.SESSDATA) {
-      headers.Cookie = `SESSDATA=${authConfig.SESSDATA}`;
-    }
-
-    const paramsObject: Record<string, string> = {};
-    for (const [key, value] of params.entries()) {
-      paramsObject[key] = value;
-    }
-    const signedParams = await sign(paramsObject);
-    const signedParamsUrlString = new URLSearchParams(signedParams);
-
-    const response = await fetch(`https://api.bilibili.com/x/web-interface/view?${signedParamsUrlString.toString()}`, {
-      method: 'GET',
-      headers,
-    });
-
-    const data = await response.json();
-    
-    if (data.code === 0 && data.data) {
-      return {
-        title: data.data.title,
-        cid: data.data.cid,
-        bvid: data.data.bvid,
-        aid: data.data.aid,
-      };
-    }
-    
-    throw new Error(`API error: ${data.message || 'Unknown error'}`);
   } catch (error) {
     console.error('Error fetching video info:', error);
     return null;
   }
 };
 
-/**
- * Extract audio URL from Bilibili video
- * @param videoInfo Video information containing aid, bvid, and cid
- * @param authConfig Authentication configuration
- * @returns Promise resolving to audio URL or null if failed
- */
 export const extractAudioUrl = async (
   videoInfo: { aid: string; bvid: string; cid: string },
   authConfig?: AuthConfig
 ): Promise<string | null> => {
   try {
-    const params = new URLSearchParams({
-      avid: videoInfo.aid,
+    const params: Record<string, string> = {
+      avid: videoInfo.aid, 
       cid: videoInfo.cid,
-      qn: '0',
-      fnval: '16',
+      qn: '0', 
+      fnval: '16', 
       fnver: '0',
-      fourk: '1',
-    });
-
-    const headers: HeadersInit = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-      'Referer': 'https://www.bilibili.com',
+      fourk: '1', 
     };
 
-    // Add SESSDATA cookie if provided
-    if (authConfig?.SESSDATA) {
-      headers.Cookie = `SESSDATA=${authConfig.SESSDATA}`;
-    }
-
-    const paramsObject: Record<string, string> = {};
-    for (const [key, value] of params.entries()) {
-      paramsObject[key] = value;
-    }
-    const signedParams = await sign(paramsObject);
-    const signedParamsUrlString = new URLSearchParams(signedParams);
-
-    // https://api.bilibili.com/x/player/playurl
-    // 使用 wbi/playurl + 完整签名流程
-    const response = await fetch(`https://api.bilibili.com/x/player/wbi/playurl?${signedParamsUrlString.toString()}`, {
-      method: 'GET',
-      headers,
-    });
-
-    const data = await response.json();
+    const data = await makeSignedBiliApiRequest<PlayUrlApiResponseData>(
+      '/x/player/wbi/playurl',
+      params,
+      authConfig
+    );
     
-    if (data.code === 0 && data.data) {
-      // Look for audio stream in dash format
-      if (data.data.dash && data.data.dash.audio && data.data.dash.audio.length > 0) {
-        // Get the highest quality audio
-        const audioStreams = data.data.dash.audio;
-        audioStreams.sort((a: any, b: any) => b.bandwidth - a.bandwidth);
-        return audioStreams[0].baseUrl || audioStreams[0].base_url;
-      }
+    if (data.dash && data.dash.audio && data.dash.audio.length > 0) {
+      const audioStreams = data.dash.audio;
+      audioStreams.sort((a, b) => b.bandwidth - a.bandwidth);
+      const bestAudio = audioStreams[0];
+      return bestAudio.baseUrl || bestAudio.base_url || null; 
+    }
       
-      // Fallback to legacy format if dash is not available
-      if (data.data.durl && data.data.durl.length > 0) {
-        return data.data.durl[0].url;
-      }
+    if (data.durl && data.durl.length > 0 && data.durl[0].url) {
+      return data.durl[0].url;
     }
     
-    throw new Error(`API error: ${data.message || 'No audio stream found'}`);
+    console.warn('No audio stream found in API response for video:', videoInfo.bvid);
+    return null; 
   } catch (error) {
     console.error('Error extracting audio URL:', error);
     return null;
   }
 };
 
-/**
- * Complete process to get audio URL from Bilibili video URL
- * @param url Bilibili video URL
- * @param authConfig Authentication configuration
- * @returns Promise resolving to complete video info with audio URL or null if failed
- */
 export const getBilibiliAudio = async (
   url: string,
   authConfig?: AuthConfig
 ): Promise<BilibiliVideoInfo | null> => {
   try {
-    // Extract video ID from URL
-    const videoId = extractVideoId(url);
+    const videoId = extractVideoId(url); // Now imported from util.ts
     if (!videoId) {
       throw new Error('Invalid Bilibili URL');
     }
 
-    // Fetch video info to get CID
     const videoInfo = await fetchVideoInfo(videoId, authConfig);
     if (!videoInfo) {
       throw new Error('Failed to fetch video info');
     }
 
-    // Extract audio URL
     const audioUrl = await extractAudioUrl(videoInfo, authConfig);
     if (!audioUrl) {
       throw new Error('Failed to extract audio URL');
@@ -336,34 +269,5 @@ export const getBilibiliAudio = async (
   }
 };
 
-/**
- * Check if current tab is a Bilibili video page
- * @param url Current tab URL
- * @returns Boolean indicating if URL is a Bilibili video page
- */
-export const isBilibiliVideoPage = (url: string): boolean => {
-  return /bilibili\.com\/video\/(av\d+|BV[a-zA-Z0-9]+)/.test(url);
-};
-
-/**
- * Save authentication configuration to Chrome storage
- * @param authConfig Authentication configuration
- * @returns Promise resolving when save is complete
- */
-export const saveAuthConfig = async (authConfig: AuthConfig): Promise<void> => {
-  return new Promise((resolve) => {
-    chrome.storage.sync.set({ authConfig }, resolve);
-  });
-};
-
-/**
- * Load authentication configuration from Chrome storage
- * @returns Promise resolving to authentication configuration or empty object if not found
- */
-export const loadAuthConfig = async (): Promise<AuthConfig> => {
-  return new Promise((resolve) => {
-    chrome.storage.sync.get('authConfig', (result) => {
-      resolve((result.authConfig as AuthConfig) || { SESSDATA: '' });
-    });
-  });
-};
+// extractVideoId, isBilibiliVideoPage, saveAuthConfig, loadAuthConfig functions
+// have been moved to src/utils/util.ts

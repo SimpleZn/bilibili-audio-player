@@ -27,3 +27,7 @@ export interface HistoryItem {
   audioUrl?: string; // Optional: Stores the most recently fetched audio URL (mainly for quick display if very recent)
   timestamp: string;   // ISO string format for when it was last played
 } 
+export interface SignData {
+  imgKey: string;
+  subKey: string;
+}

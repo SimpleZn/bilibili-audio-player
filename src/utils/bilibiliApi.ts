@@ -1,7 +1,138 @@
 /**
  * Bilibili API utilities for extracting audio URLs from video pages
  */
-import { BilibiliVideoInfo, AuthConfig } from './types'; // Import shared types
+import { BilibiliVideoInfo, AuthConfig, SignData } from './types'; // Import shared types
+import { encWbi } from './util';
+
+function parseSignData(json: any): SignData {  
+  const imgUrl = json.data.wbi_img.img_url;  
+  const subUrl = json.data.wbi_img.sub_url;  
+    
+  const imgKey = imgUrl.substring(imgUrl.lastIndexOf('/') + 1, imgUrl.lastIndexOf('.'));  
+  const subKey = subUrl.substring(subUrl.lastIndexOf('/') + 1, subUrl.lastIndexOf('.'));  
+    
+  return {  
+    imgKey: imgKey,  
+    subKey: subKey  
+  };  
+}
+
+async function getSignData() {  
+  const headers: HeadersInit = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'Referer': 'https://www.bilibili.com',
+  };
+  const response = await fetch("https://api.bilibili.com/x/web-interface/nav", {  
+    method: 'GET',  
+    headers
+  });  
+  
+  if (response.ok) {  
+    const data = await response.json();  
+    return parseSignData(data);  
+  } else {  
+    throw new Error(`获取签名秘钥失败: ${response.status}`);  
+  }  
+}  
+
+
+
+async function getCachedSignData() {  
+  const cachedData = await chrome.storage.local.get(['signData', 'cacheTime']);  
+  const now = Date.now();  
+    
+  // 检查缓存是否在1天内有效  
+  if (!cachedData.signData || !cachedData.cacheTime ||   
+      (now - cachedData.cacheTime) > 24 * 60 * 60 * 1000) {  
+    const newSignData = await getSignData();  
+    await chrome.storage.local.set({  
+      signData: newSignData,  
+      cacheTime: now  
+    });  
+    return newSignData;
+  } else {
+    return cachedData.signData;
+  }
+}
+
+async function getSpiData() {  
+  const headers: HeadersInit = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'Referer': 'https://www.bilibili.com',
+  };
+  const response = await fetch("https://api.bilibili.com/x/frontend/finger/spi", {  
+    method: 'GET',  
+    headers
+  });  
+  
+  if (!response.ok) {  
+    throw new Error(`获取SPI数据失败: ${response.status}`);  
+  }  
+  
+  const data = await response.json();  
+  return {  
+    b3: data.data.b_3,  
+    b4: data.data.b_4  
+  };  
+}
+
+export async function initSignData() {  
+  // 检查缓存是否有效（1天内）  
+  const cachedData = await chrome.storage.local.get([  
+    'signData',   
+    'cacheTime',  
+    'spiData'  
+  ]);  
+    
+  const now = Date.now();  
+  const oneDayInMs = 24 * 60 * 60 * 1000;  
+    
+  // 如果缓存存在且在1天内有效  
+  if (cachedData.signData &&   
+      cachedData.cacheTime &&   
+      cachedData.spiData &&  
+      (now - cachedData.cacheTime) < oneDayInMs) {  
+    console.log('使用缓存的签名数据');  
+    return {  
+      signData: cachedData.signData,  
+      spiData: cachedData.spiData  
+    };  
+  }  
+    
+  console.log('缓存失效，重新获取签名数据');  
+    
+  try {  
+    // 并行获取签名数据和SPI数据  
+    const [signData, spiData] = await Promise.all([  
+      getSignData(),  
+      getSpiData()  
+    ]);  
+      
+    // 保存到缓存  
+    await chrome.storage.local.set({  
+      signData: signData,  
+      spiData: spiData,  
+      cacheTime: now  
+    });  
+      
+    console.log('签名数据获取成功并已缓存');  
+    return { signData, spiData };  
+      
+  } catch (error) {  
+    console.error('获取签名数据失败:', error);  
+    throw error;  
+  }  
+}  
+
+  // 对参数进行签名
+  export  async function sign(params: Record<string, string>) {
+    const signData = await getCachedSignData();
+    if (signData) {
+      return encWbi(params, signData.imgKey, signData.subKey);
+    } else {
+      console.error('请先获取认证秘钥 signData');
+    }
+  }
 
 /**
  * Extract video ID (BV or AV) from Bilibili URL
@@ -47,6 +178,7 @@ export const fetchVideoInfo = async (
 ): Promise<{ title: string; cid: string; bvid: string; aid: string } | null> => {
   try {
     const params = new URLSearchParams();
+    const signData = await getSignData();
     if (videoId.bvid) {
       params.append('bvid', videoId.bvid);
     } else if (videoId.aid) {
@@ -64,7 +196,14 @@ export const fetchVideoInfo = async (
       headers.Cookie = `SESSDATA=${authConfig.SESSDATA}`;
     }
 
-    const response = await fetch(`https://api.bilibili.com/x/web-interface/view?${params.toString()}`, {
+    const paramsObject: Record<string, string> = {};
+    for (const [key, value] of params.entries()) {
+      paramsObject[key] = value;
+    }
+    const signedParams = await sign(paramsObject);
+    const signedParamsUrlString = new URLSearchParams(signedParams);
+
+    const response = await fetch(`https://api.bilibili.com/x/web-interface/view?${signedParamsUrlString.toString()}`, {
       method: 'GET',
       headers,
     });
@@ -117,7 +256,16 @@ export const extractAudioUrl = async (
       headers.Cookie = `SESSDATA=${authConfig.SESSDATA}`;
     }
 
-    const response = await fetch(`https://api.bilibili.com/x/player/playurl?${params.toString()}`, {
+    const paramsObject: Record<string, string> = {};
+    for (const [key, value] of params.entries()) {
+      paramsObject[key] = value;
+    }
+    const signedParams = await sign(paramsObject);
+    const signedParamsUrlString = new URLSearchParams(signedParams);
+
+    // https://api.bilibili.com/x/player/playurl
+    // 使用 wbi/playurl + 完整签名流程
+    const response = await fetch(`https://api.bilibili.com/x/player/wbi/playurl?${signedParamsUrlString.toString()}`, {
       method: 'GET',
       headers,
     });

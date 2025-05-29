@@ -1,8 +1,14 @@
-import { getBilibiliAudio, loadAuthConfig } from './utils/bilibiliApi';
+import { getBilibiliAudio, initSignData } from './utils/bilibiliApi';
 
 // Background script for Chrome extension
-chrome.runtime.onInstalled.addListener(() => {
-  console.log('Bilibili Audio Player extension installed');
+chrome.runtime.onInstalled.addListener(async () => {
+
+  try {  
+    await initSignData();  
+    console.log('Bilibili Audio Player extension installed');
+  } catch (error) {  
+    console.error('插件启动时初始化失败:', error);  
+  }  
 });
 
 // Listen for messages from content scripts or popup

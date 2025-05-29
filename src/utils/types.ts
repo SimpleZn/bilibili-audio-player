@@ -27,3 +27,67 @@ export interface HistoryItem {
   audioUrl?: string; // Optional: Stores the most recently fetched audio URL (mainly for quick display if very recent)
   timestamp: string;   // ISO string format for when it was last played
 } 
+export interface SignData {
+  imgKey: string;
+  subKey: string;
+}
+
+// API Response Data Structures
+
+/**
+ * Data structure for the /x/web-interface/view API endpoint response.
+ */
+export interface ViewApiResponseData {
+  title: string;
+  cid: string;
+  bvid: string;
+  aid: string;
+  [key: string]: any; // Allow other properties not strictly typed here
+}
+
+/**
+ * Represents a single audio stream in the DASH manifest.
+ */
+export interface DashAudioStream {
+  id: number;
+  baseUrl?: string;    // Preferred URL key
+  base_url?: string;   // Alternative URL key used in some API versions
+  bandwidth: number;   // Audio quality indicator (higher is better)
+  [key: string]: any; // Allow other properties
+}
+
+/**
+ * Represents the DASH data containing audio streams.
+ */
+export interface PlayUrlDashData {
+  audio?: DashAudioStream[];
+  [key: string]: any; // Allow other properties
+}
+
+/**
+ * Represents a DURL (direct URL) item, a fallback for older API responses.
+ */
+export interface PlayUrlDurlData {
+  url: string;
+  [key: string]: any; // Allow other properties
+}
+
+/**
+ * Data structure for the /x/player/wbi/playurl API endpoint response.
+ */
+export interface PlayUrlApiResponseData {
+  dash?: PlayUrlDashData;
+  durl?: PlayUrlDurlData[]; // Fallback for older formats
+  [key: string]: any; // Allow other properties
+}
+
+/**
+ * Generic wrapper for Bilibili API responses.
+ * @template T The type of the actual data payload.
+ */
+export interface BiliApiResponse<T> {
+  code: number;      // API response code (0 for success)
+  message: string;   // API message
+  data?: T;          // The actual data payload, type-parameterized
+  ttl?: number;      // Time-to-live or other metadata
+}

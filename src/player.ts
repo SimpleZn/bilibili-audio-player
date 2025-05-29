@@ -179,7 +179,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Auto play
     audioPlayer.play().catch(error => {
-      console.error('Auto-play failed:', error);
+      console.error('Auto-play failed:', error?.toString());
       showPlayerMessage('自动播放失败，请点击播放按钮手动播放', 'error');
     });
     

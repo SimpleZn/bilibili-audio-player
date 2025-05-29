@@ -2,9 +2,8 @@
 // Popup page script
 import {
   getBilibiliAudio,
-  isBilibiliVideoPage,
-  loadAuthConfig
 } from "./utils/bilibiliApi";
+import { isBilibiliVideoPage, loadAuthConfig } from "./utils/util"; // Updated import path
 import { Playlist } from "./utils/playlistTypes"; // Import Playlist type
 import { HistoryItem, BilibiliVideoInfo, AuthConfig } from "./utils/types"; // Import shared types
 
@@ -243,7 +242,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       // For now, getBilibiliAudio in background takes a URL and can re-derive cid.
       const videoUrl = `https://www.bilibili.com/video/${bvid}`;
       // Auth config should be loaded here to pass to background, or background loads it.
-      loadAuthConfig().then(authConfig => {
+      loadAuthConfig().then((authConfig: AuthConfig) => { // Explicitly type authConfig
         chrome.runtime.sendMessage(
           { action: "getBilibiliAudio", url: videoUrl, authConfig: authConfig }, // `cid` could be passed if needed by background
           (response) => {
@@ -286,7 +285,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       itemsToDisplay.forEach((item) => {
         const li = document.createElement("li");
         li.className = "history-item";
-        li.dataset.audioUrl = item.audioUrl;
+        li.dataset.audioUrl = encodeURIComponent(item.audioUrl || '');
         li.dataset.title = item.title;
         if (item.bvid) {
           li.dataset.bvid = item.bvid;

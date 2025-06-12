@@ -46,6 +46,8 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentTrackIndex: number = -1;
   let isPlaylistMode: boolean = false;
 
+  let currentObjectUrl: string | null = null; // For managing Blob URLs
+
   // Interface for current track data
   interface CurrentTrackData {
     title: string;
@@ -167,7 +169,41 @@ document.addEventListener('DOMContentLoaded', () => {
     videoId.textContent = `BV: ${videoData.bvid}`;
     
     // Set audio source
-    audioPlayer.src = videoData.audioUrl;
+    // --- MODIFICATION FOR STEP 3: Fetch audio data and use Object URL ---
+    showPlayerMessage('正在加载音频...', 'info');
+    fetch(videoData.audioUrl, {
+      method: 'GET',
+      headers: {
+        'Referer': 'https://www.bilibili.com/'
+      },
+      credentials: 'include', // Crucial for sending cookies
+      // Potentially add 'Cache-Control': 'no-cache' if fresh data is always needed
+    })
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`HTTP错误！状态: ${response.status} (URL: ${videoData.audioUrl})`);
+      }
+      return response.blob();
+    })
+    .then(blob => {
+      if (currentObjectUrl) {
+        URL.revokeObjectURL(currentObjectUrl);
+      }
+      currentObjectUrl = URL.createObjectURL(blob);
+      audioPlayer.src = currentObjectUrl;
+      showPlayerMessage('音频加载完成', 'success');
+      audioPlayer.play().catch(e => {
+        console.error("Error playing audio:", e);
+        showPlayerMessage(`播放音频失败: ${e.message || e}`, 'error');
+      });
+    })
+    .catch(error => {
+      console.error('获取或播放音频失败:', error);
+      showPlayerMessage(`获取音频失败: ${error.message}`, 'error');
+      // Fallback or further error handling could be added here
+    });
+    // --- END MODIFICATION ---
+
     audioPlayer.volume = 0.7; // Default volume
     
     // Update volume level display
@@ -676,4 +712,13 @@ document.addEventListener('DOMContentLoaded', () => {
       });
   }
   // interface BilibiliVideoInfo { ... } // REMOVED
+});
+
+// Add event listener for window unload to revoke object URL
+window.addEventListener('beforeunload', () => {
+  if (currentObjectUrl) {
+    URL.revokeObjectURL(currentObjectUrl);
+    currentObjectUrl = null;
+    console.log('Revoked audio object URL on window unload.');
+  }
 });

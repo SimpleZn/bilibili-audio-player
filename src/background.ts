@@ -1,14 +1,61 @@
 import { getBilibiliAudio, initSignData } from './utils/bilibiliApi';
 
 // Background script for Chrome extension
-chrome.runtime.onInstalled.addListener(async () => {
 
-  try {  
-    await initSignData();  
-    console.log('Bilibili Audio Player extension installed');
-  } catch (error) {  
-    console.error('插件启动时初始化失败:', error);  
-  }  
+const RULE_ID = 1; // Define a constant for the rule ID
+
+chrome.runtime.onInstalled.addListener(async (details) => {
+  try {
+    await initSignData();
+    console.log('Bilibili Audio Player extension installed/updated');
+  } catch (error) {
+    console.error('插件启动时初始化失败:', error);
+  }
+
+  // Setup declarativeNetRequest rules
+  const updateRules = async () => {
+    const currentRules = await chrome.declarativeNetRequest.getDynamicRules();
+    const ruleIdsToRemove = currentRules.map(rule => rule.id);
+
+    await chrome.declarativeNetRequest.updateDynamicRules({
+      removeRuleIds: ruleIdsToRemove,
+      addRules: [
+        {
+          id: RULE_ID,
+          priority: 1,
+          action: {
+            type: chrome.declarativeNetRequest.RuleActionType.MODIFY_HEADERS,
+            requestHeaders: [
+              { header: 'Referer', operation: chrome.declarativeNetRequest.HeaderOperation.SET, value: 'https://www.bilibili.com/' },
+              { header: 'Origin', operation: chrome.declarativeNetRequest.HeaderOperation.SET, value: 'https://www.bilibili.com' }
+            ]
+          },
+          condition: {
+            initiatorDomains: [chrome.runtime.id],
+            requestDomains: [
+              "upos-hz-mirrorakam.akamaized.net",
+              "cn-gotcha01-akcore.bilivideo.com",
+              // Add more known Bilibili CDN domains as they are identified
+              // General patterns (less specific but broader coverage)
+              "*.bilivideo.com",
+              "*.biliapi.net", // Might be too broad, monitor if it causes issues
+              "*.akamaized.net", // Bilibili uses Akamai, might need to be more specific if it affects other Akamai-hosted sites
+              "*.bilivideo.cn"
+            ],
+            resourceTypes: [chrome.declarativeNetRequest.ResourceType.MEDIA]
+          }
+        }
+      ]
+    });
+    console.log("DeclarativeNetRequest rules updated.");
+  };
+
+  if (details.reason === "install" || details.reason === "update") {
+    await updateRules();
+  } else if (details.reason === "chrome_update") {
+    // Also consider updating rules on browser update, as rules can sometimes be cleared
+    await updateRules();
+  }
 });
 
 // Listen for messages from content scripts or popup
@@ -79,15 +126,5 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   }
 });
 
-// Optional: Listener for when the extension is installed or updated
-chrome.runtime.onInstalled.addListener((details) => {
-  if (details.reason === "install") {
-    console.log("Bilibili Audio Player extension installed.");
-    // Perform any first-time setup here, like initializing default settings
-  } else if (details.reason === "update") {
-    const thisVersion = chrome.runtime.getManifest().version;
-    console.log(
-      `Bilibili Audio Player extension updated from ${details.previousVersion} to ${thisVersion}!`
-    );
-  }
-});
+// The existing onInstalled listener was merged with the one above.
+// Ensure other parts of the original onInstalled listener (like initSignData) are preserved.

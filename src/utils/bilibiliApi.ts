@@ -34,7 +34,9 @@ async function makeSignedBiliApiRequest<T>(
     'Referer': 'https://www.bilibili.com',
   };
 
-  if (authConfig?.SESSDATA) {
+  if (authConfig?.cookieString) {
+    headers.Cookie = authConfig.cookieString;
+  } else if (authConfig?.SESSDATA) {
     headers.Cookie = `SESSDATA=${authConfig.SESSDATA}`;
   }
 
@@ -203,12 +205,12 @@ export const extractAudioUrl = async (
 ): Promise<string | null> => {
   try {
     const params: Record<string, string> = {
-      avid: videoInfo.aid, 
+      avid: videoInfo.aid,
       cid: videoInfo.cid,
-      qn: '0', 
-      fnval: '16', 
+      qn: '0',
+      fnval: '4048', // DASH + HDR + 4K + Dolby Vision + Dolby Atmos + AV1 + FLAC
       fnver: '0',
-      fourk: '1', 
+      fourk: '1',
     };
 
     const data = await makeSignedBiliApiRequest<PlayUrlApiResponseData>(
@@ -217,13 +219,17 @@ export const extractAudioUrl = async (
       authConfig
     );
     
-    if (data.dash && data.dash.audio && data.dash.audio.length > 0) {
-      const audioStreams = data.dash.audio;
-      audioStreams.sort((a, b) => b.bandwidth - a.bandwidth);
-      const bestAudio = audioStreams[0];
-      return bestAudio.baseUrl || bestAudio.base_url || null; 
+    // Dolby Atmos takes priority (highest quality)
+    if (data.dolby?.audio && data.dolby.audio.length > 0) {
+      const best = data.dolby.audio.reduce((a, b) => b.bandwidth > a.bandwidth ? b : a);
+      return best.baseUrl || best.base_url || null;
     }
-      
+
+    if (data.dash && data.dash.audio && data.dash.audio.length > 0) {
+      const best = data.dash.audio.reduce((a, b) => b.bandwidth > a.bandwidth ? b : a);
+      return best.baseUrl || best.base_url || null;
+    }
+
     if (data.durl && data.durl.length > 0 && data.durl[0].url) {
       return data.durl[0].url;
     }

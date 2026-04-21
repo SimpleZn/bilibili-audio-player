@@ -15,6 +15,7 @@ export interface BilibiliVideoInfo {
  */
 export interface AuthConfig {
   SESSDATA: string;
+  cookieString?: string; // Full browser cookie string (buvid3, bili_ticket, etc.)
 }
 
 /**
@@ -72,12 +73,18 @@ export interface PlayUrlDurlData {
   [key: string]: any; // Allow other properties
 }
 
+export interface DolbyData {
+  type: number; // 1 = Dolby Atmos
+  audio?: DashAudioStream[];
+}
+
 /**
  * Data structure for the /x/player/wbi/playurl API endpoint response.
  */
 export interface PlayUrlApiResponseData {
   dash?: PlayUrlDashData;
   durl?: PlayUrlDurlData[]; // Fallback for older formats
+  dolby?: DolbyData;
   [key: string]: any; // Allow other properties
 }
 

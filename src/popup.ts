@@ -7,6 +7,15 @@ import { isBilibiliVideoPage, loadAuthConfig } from "./utils/util"; // Updated i
 import { Playlist } from "./utils/playlistTypes"; // Import Playlist type
 import { HistoryItem, BilibiliVideoInfo, AuthConfig } from "./utils/types"; // Import shared types
 
+function getBrowserCookieString(): Promise<string> {
+  return new Promise(resolve => {
+    chrome.cookies.getAll({ domain: 'bilibili.com' }, cookies => {
+      if (chrome.runtime.lastError || !cookies) { resolve(''); return; }
+      resolve(cookies.map(c => `${c.name}=${c.value}`).join('; '));
+    });
+  });
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   const videoUrlInput = document.getElementById(
     "video-url"
@@ -102,11 +111,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       extractBtn.innerHTML = '<span class="loading"></span>提取中...';
       showStatus("正在提取音频信息...", "info");
 
-      // Load auth config
+      // Load auth config + full browser cookies for anti-bot compliance
       const authConfig = await loadAuthConfig();
+      const cookieString = await getBrowserCookieString();
 
       // Get audio info
-      const videoInfo = await getBilibiliAudio(url, authConfig);
+      const videoInfo = await getBilibiliAudio(url, { ...authConfig, cookieString });
 
       if (!videoInfo) {
         throw new Error("无法提取音频信息，请检查链接或登录状态");

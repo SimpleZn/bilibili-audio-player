@@ -177,8 +177,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const isFav = await checkIfVideoIsFavorited(videoData);
     updateFavoriteIcon(isFav);
     
-    // Auto play
-    audioPlayer.play().catch(error => {
+    // Listen for media load errors (e.g. 403 from CDN)
+    audioPlayer.onerror = () => {
+      const code = audioPlayer.error?.code;
+      const msg = audioPlayer.error?.message || '';
+      console.error('Audio load error:', code, msg);
+      showPlayerMessage(`音频加载失败 (code ${code})，请检查网络或重试`, 'error');
+    };
+
+    // Muted autoplay bypasses Chrome's autoplay policy; unmute immediately after
+    audioPlayer.muted = true;
+    audioPlayer.play().then(() => {
+      audioPlayer.muted = false;
+    }).catch(error => {
+      audioPlayer.muted = false;
       console.error('Auto-play failed:', error?.toString());
       showPlayerMessage('自动播放失败，请点击播放按钮手动播放', 'error');
     });

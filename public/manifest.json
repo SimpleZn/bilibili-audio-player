@@ -8,10 +8,14 @@
     "tabs",
     "activeTab",
     "scripting",
-    "contextMenus"
+    "contextMenus",
+    "cookies",
+    "declarativeNetRequest"
   ],
   "host_permissions": [
-    "*://*.bilibili.com/*"
+    "*://*.bilibili.com/*",
+    "*://*.bilivideo.com/*",
+    "*://*.bilivideo.cn/*"
   ],
   "action": {
     "default_popup": "popup.html",

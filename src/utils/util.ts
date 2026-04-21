@@ -52,6 +52,10 @@ export function encWbi(params: Record<string, any>, imgKey: string, subKey: stri
  * @returns Video ID object containing aid, bvid, or null if not found
  */
 export const extractVideoId = (url: string): { aid?: string; bvid?: string } | null => {
+  const trimmed = url.trim();
+  if (/^BV[a-zA-Z0-9]+$/.test(trimmed)) return { bvid: trimmed };
+  if (/^av(\d+)$/i.test(trimmed)) return { aid: trimmed.replace(/^av/i, '') };
+
   // Match BV ID pattern
   const bvMatch = url.match(/\/video\/(BV[a-zA-Z0-9]+)/);
   if (bvMatch && bvMatch[1]) {
